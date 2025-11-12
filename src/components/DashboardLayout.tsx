@@ -1,4 +1,4 @@
-import { Heart, LayoutDashboard, Users, Calendar, Package, DollarSign, Settings, LogOut } from "lucide-react";
+import { Heart, LayoutDashboard, Users, Calendar, Package, DollarSign, Settings, LogOut, Stethoscope, FileText, PawPrint } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,9 +15,12 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Clientes", href: "/clients", icon: Users },
+    { name: "Pets", href: "/pets", icon: PawPrint },
     { name: "Agendamentos", href: "/appointments", icon: Calendar },
+    { name: "Serviços", href: "/services", icon: Stethoscope },
     { name: "Estoque", href: "/inventory", icon: Package },
     { name: "Financeiro", href: "/financial", icon: DollarSign },
+    { name: "Relatórios", href: "/reports", icon: FileText },
   ];
 
   const handleLogout = () => {
