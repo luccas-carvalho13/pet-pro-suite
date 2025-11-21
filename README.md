@@ -1,73 +1,150 @@
-# Welcome to your Lovable project
+# Pet Pro Suite
 
-## Project info
+Sistema de gestão completo para clínicas veterinárias e pet shops.
 
-**URL**: https://lovable.dev/projects/c0a6b989-f4e8-4a50-964b-6b01654bc773
+## 📁 Estrutura do Projeto
 
-## How can I edit this code?
+O projeto está organizado em uma arquitetura moderna e escalável, separando claramente frontend e backend:
 
-There are several ways of editing your application.
+```
+pet-pro-suite/
+├── frontend/                 # Aplicação React/Vite
+│   ├── src/
+│   │   ├── app/             # Configuração da aplicação
+│   │   │   ├── providers/   # Providers (QueryClient, Theme, etc)
+│   │   │   └── router/      # Configuração de rotas
+│   │   ├── features/        # Features organizadas por domínio
+│   │   │   ├── auth/
+│   │   │   ├── clients/
+│   │   │   ├── pets/
+│   │   │   ├── appointments/
+│   │   │   ├── inventory/
+│   │   │   ├── services/
+│   │   │   ├── financial/
+│   │   │   ├── reports/
+│   │   │   ├── settings/
+│   │   │   ├── dashboard/
+│   │   │   ├── landing/
+│   │   │   └── super-admin/
+│   │   ├── shared/          # Código compartilhado
+│   │   │   ├── components/  # Componentes reutilizáveis
+│   │   │   ├── hooks/       # Hooks compartilhados
+│   │   │   ├── lib/         # Utilitários
+│   │   │   ├── types/       # Tipos TypeScript
+│   │   │   └── constants/   # Constantes
+│   │   ├── api/             # Cliente API e serviços
+│   │   │   ├── client.ts    # Cliente Supabase
+│   │   │   ├── integrations/ # Integrações (Supabase)
+│   │   │   └── services/    # Serviços organizados por domínio
+│   │   └── assets/          # Imagens, fonts, etc
+│   ├── public/
+│   └── package.json
+│
+├── backend/                  # Backend (Supabase)
+│   ├── functions/           # Edge Functions (Deno)
+│   │   └── register-company/
+│   ├── migrations/          # Migrações SQL
+│   └── config.toml          # Configuração Supabase
+│
+└── README.md
+```
 
-**Use Lovable**
+## 🚀 Início Rápido
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/c0a6b989-f4e8-4a50-964b-6b01654bc773) and start prompting.
+### Frontend
 
-Changes made via Lovable will be committed automatically to this repo.
+```bash
+cd frontend
+npm install
 
-**Use your preferred IDE**
+# Configure as variáveis de ambiente
+cp .env.example .env
+# Edite .env com suas credenciais do Supabase
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Backend
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+O backend utiliza Supabase em produção. O banco já está configurado e as tabelas criadas.
 
-**Use GitHub Codespaces**
+**Conexão do Banco:**
+```
+postgresql://postgres.srlvfqbwepzzmljftsfx:?k$U78uNPrkpLXz@aws-1-sa-east-1.pooler.supabase.com:6543/postgres
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+**⚠️ IMPORTANTE**: Mantenha as credenciais seguras!
 
-## What technologies are used for this project?
+Para desenvolvimento local com Supabase CLI:
 
-This project is built with:
+```bash
+cd backend
+supabase start
+supabase db reset
+```
 
-- Vite
+## 🏗️ Arquitetura
+
+### Frontend
+
+- **Feature-Based Structure**: Cada feature contém sua própria lógica, componentes e páginas
+- **Shared Resources**: Componentes, hooks e utilitários compartilhados
+- **API Layer**: Camada de abstração para comunicação com o backend
+- **Type Safety**: TypeScript com tipos gerados do Supabase
+
+### Backend
+
+- **Supabase Edge Functions**: Funções serverless em Deno
+- **Database Migrations**: Versionamento do schema do banco de dados
+- **Multi-Tenant Architecture**: Schema baseado em tenants para isolamento de dados
+- **Custom Authentication**: Autenticação usando tabela users própria
+
+## 📦 Tecnologias
+
+### Frontend
+- React 18
 - TypeScript
-- React
-- shadcn-ui
+- Vite
+- React Router
+- TanStack Query
 - Tailwind CSS
+- shadcn/ui
+- Supabase Client
 
-## How can I deploy this project?
+### Backend
+- Supabase
+- Deno (Edge Functions)
+- PostgreSQL
 
-Simply open [Lovable](https://lovable.dev/projects/c0a6b989-f4e8-4a50-964b-6b01654bc773) and click on Share -> Publish.
+## 🔧 Desenvolvimento
 
-## Can I connect a custom domain to my Lovable project?
+### Adicionar uma nova feature
 
-Yes, you can!
+1. Crie a estrutura em `frontend/src/features/[nome-feature]/`
+2. Adicione a rota em `frontend/src/app/router/app-router.tsx`
+3. Crie os serviços necessários em `frontend/src/api/services/`
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### Adicionar um novo serviço API
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+1. Crie o arquivo em `frontend/src/api/services/[nome].service.ts`
+2. Exporte no `frontend/src/api/services/index.ts`
+3. Use o cliente Supabase de `frontend/src/api/client.ts`
+
+## 📝 Convenções
+
+- **Componentes**: PascalCase (ex: `DashboardLayout.tsx`)
+- **Hooks**: camelCase com prefixo `use` (ex: `useToast.ts`)
+- **Serviços**: camelCase com sufixo `.service.ts` (ex: `auth.service.ts`)
+- **Tipos**: PascalCase em arquivos `.types.ts` ou `index.ts`
+- **Constantes**: UPPER_SNAKE_CASE em `constants/index.ts`
+
+## 🧪 Testes
+
+```bash
+cd frontend
+npm run test
+```
+
+## 📄 Licença
+
+MIT

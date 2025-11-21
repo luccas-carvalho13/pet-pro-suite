@@ -1,0 +1,11 @@
+# Supabase Configuration
+# Para desenvolvimento local, use: supabase start
+# Para produção, configure as variáveis de ambiente
+
+project_id = "srlvfqbwepzzmljftsfx"
+
+[functions.register-company]
+verify_jwt = false
+
+# Database connection (para referência)
+# postgresql://postgres.srlvfqbwepzzmljftsfx:?k$U78uNPrkpLXz@aws-1-sa-east-1.pooler.supabase.com:6543/postgres
