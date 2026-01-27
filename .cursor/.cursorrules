@@ -1,0 +1,70 @@
+# pet-pro-suite — Cursor Rules
+
+Você é especialista em TypeScript, React, Vite, Supabase, shadcn/ui, Radix, Tailwind e react-hook-form.
+
+## Filosofia
+
+**Quanto menor e mais simples, melhor.** Código conciso > verboso. Evitar over-engineering e abstrações prematuras. Uma linha clara > três confusas.
+
+## Stack deste projeto
+
+- **Runtime:** Vite + React 18 + TypeScript
+- **Roteamento:** react-router-dom
+- **Backend/Auth:** Supabase (@/integrations/supabase/client)
+- **Data:** TanStack React Query
+- **Formulários:** react-hook-form + zod + @hookform/resolvers
+- **UI:** shadcn/ui, Radix, Tailwind, lucide-react, sonner
+- **Imports:** alias `@` → `src/`
+
+## Nomenclatura
+
+- Componentes/hooks/páginas: PascalCase. Utils/variáveis: camelCase. Constantes: camelCase (não UPPER_CASE).
+- Arquivos: PascalCase para componentes/páginas (`Dashboard.tsx`), camelCase para hooks/utils (`useMobile.tsx`).
+
+## Regras de código
+
+### NUNCA
+- Comentar código; criar READMEs/docs; duplicar configs/constantes em 2+ arquivos
+- Código verboso quando existe versão simples; abstrações “por via das dúvidas”; wrappers inúteis
+- console.log em prod; comentar em vez de deletar; TODOs/FIXMEs; `var`; imports não usados
+- Ícones fora do lucide-react
+
+### SEMPRE
+- Código limpo e autoexplicativo; reutilizar quando usado 2+ vezes; única fonte de verdade para constantes
+- Optional chaining (`?.`) e nullish coalescing (`??`); early returns; componentes pequenos e focados
+- Ícones só de lucide-react
+
+### Conciso
+- `const fn = () => x` em vez de blocos com `return` desnecessário
+- `if (user?.email?.length)` em vez de `user && user.email && user.email.length > 0`
+- Ternário/arrow curta em vez de if/else quando cabe em uma linha
+- Lógica usada 2+ vezes → extrair; usada 1x → deixar inline
+
+## Estrutura do projeto
+
+```
+src/
+├── components/     # ui/ = shadcn; outros = feature/layout
+├── hooks/
+├── integrations/   # supabase client + types
+├── lib/            # utils (cn, etc), supabase helpers
+└── pages/          # rotas (Landing, Auth, Dashboard, etc.)
+```
+
+## Padrões por camada
+
+- **Componentes:** funcionais, props desestruturadas e defaults inline. Preferir arrow para pequenos; `function` para páginas/principais.
+- **Estado:** useState local; TanStack Query para servidor; dependências corretas em useEffect; useCallback/useMemo só quando medido.
+- **Forms:** FormProvider + Controller; validação com zod; erros em `errors`, feedback com sonner.
+- **Supabase:** `import { supabase } from "@/integrations/supabase/client"`. Validar dados antes de usar.
+- **UI:** cn() para classes condicionais; spacing gap-2/4/6; rounded-lg; Dialog/Toast shadcn + sonner.
+
+## Práticas rápidas
+
+- **Rotas:** definidas em `App.tsx` (Routes/Route). Links com `<Link to="...">` (react-router).
+- **Env:** `import.meta.env.VITE_*` (não `process.env`).
+- **Git:** não commitar .env, console.log ou código comentado.
+
+---
+
+Código deve parecer escrito por humano experiente: pragmático, direto e **conciso**.

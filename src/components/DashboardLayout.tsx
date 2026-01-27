@@ -1,89 +1,86 @@
-import { Heart, LayoutDashboard, Users, Calendar, Package, DollarSign, Settings, LogOut, Stethoscope, FileText, PawPrint } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import * as React from "react";
+import { Link, useLocation } from "react-router-dom";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { Separator } from "@/components/ui/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
+
+const ROUTE_BREADCRUMB: Record<string, string> = {
+  "/dashboard": "Dashboard",
+  "/clients": "Clientes",
+  "/pets": "Pets",
+  "/appointments": "Agendamentos",
+  "/services": "Serviços",
+  "/inventory": "Estoque",
+  "/financial": "Financeiro",
+  "/reports": "Relatórios",
+  "/settings": "Configurações",
+  "/super-admin": "Super Admin",
+};
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
+  breadcrumbs?: { label: string; href?: string }[];
+  user?: { name: string; email: string; avatar?: string };
 }
 
-export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
+export const DashboardLayout = ({
+  children,
+  breadcrumbs: breadcrumbsProp,
+  user,
+}: DashboardLayoutProps) => {
   const location = useLocation();
-  const navigate = useNavigate();
+  const pathname = location.pathname;
 
-  const navigation = [
-    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Clientes", href: "/clients", icon: Users },
-    { name: "Pets", href: "/pets", icon: PawPrint },
-    { name: "Agendamentos", href: "/appointments", icon: Calendar },
-    { name: "Serviços", href: "/services", icon: Stethoscope },
-    { name: "Estoque", href: "/inventory", icon: Package },
-    { name: "Financeiro", href: "/financial", icon: DollarSign },
-    { name: "Relatórios", href: "/reports", icon: FileText },
-  ];
-
-  const handleLogout = () => {
-    toast.success("Logout realizado com sucesso!");
-    navigate("/");
-  };
+  const breadcrumbs =
+    breadcrumbsProp ??
+    (() => {
+      const currentLabel = ROUTE_BREADCRUMB[pathname] ?? (pathname.slice(1) || "Início");
+      const hasParent = pathname !== "/dashboard" && pathname !== "/";
+      return hasParent
+        ? [{ label: "Início", href: "/dashboard" }, { label: currentLabel }]
+        : [{ label: currentLabel }];
+    })();
 
   return (
-    <div className="min-h-screen flex">
-      {/* Sidebar */}
-      <aside className="w-64 border-r bg-card/50 backdrop-blur-sm flex flex-col">
-        <div className="p-6 border-b">
-          <Link to="/dashboard" className="flex items-center gap-2">
-            <Heart className="h-6 w-6 text-primary" />
-            <span className="font-bold text-lg">PetCare ERP</span>
-          </Link>
-        </div>
-        
-        <nav className="flex-1 p-4 space-y-1">
-          {navigation.map((item) => {
-            const isActive = location.pathname === item.href;
-            return (
-              <Link
-                key={item.name}
-                to={item.href}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg transition-all",
-                  isActive
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <item.icon className="h-5 w-5" />
-                <span className="font-medium">{item.name}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="p-4 border-t space-y-1">
-          <Link to="/settings">
-            <Button variant="ghost" className="w-full justify-start gap-3">
-              <Settings className="h-5 w-5" />
-              <span>Configurações</span>
-            </Button>
-          </Link>
-          <Button 
-            variant="ghost" 
-            className="w-full justify-start gap-3 text-destructive hover:text-destructive hover:bg-destructive/10"
-            onClick={handleLogout}
-          >
-            <LogOut className="h-5 w-5" />
-            <span>Sair</span>
-          </Button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="container mx-auto p-6 max-w-7xl">
+    <SidebarProvider>
+      <AppSidebar user={user} />
+      <SidebarInset>
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:md:h-12">
+          <div className="flex flex-1 items-center gap-2 px-2">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                {breadcrumbs.map((item, i) => (
+                  <React.Fragment key={i}>
+                    {i > 0 && <BreadcrumbSeparator className="hidden md:block" />}
+                    <BreadcrumbItem className={i > 0 ? "hidden md:block" : ""}>
+                      {item.href ? (
+                        <BreadcrumbLink asChild>
+                          <Link to={item.href}>{item.label}</Link>
+                        </BreadcrumbLink>
+                      ) : (
+                        <BreadcrumbPage>{item.label}</BreadcrumbPage>
+                      )}
+                    </BreadcrumbItem>
+                  </React.Fragment>
+                ))}
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+        </header>
+        <div className="flex flex-1 flex-col gap-4 overflow-auto p-4 md:gap-6 md:p-6">
           {children}
         </div>
-      </main>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 };

@@ -164,10 +164,11 @@ serve(async (req: Request) => {
         status: 200,
       }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Erro no registro:", error);
+    const message = error instanceof Error ? error.message : String(error);
     return new Response(
-      JSON.stringify({ error: error.message || "Erro ao processar registro" }),
+      JSON.stringify({ error: message || "Erro ao processar registro" }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 400,

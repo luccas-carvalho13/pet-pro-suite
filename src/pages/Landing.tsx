@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, Calendar, Users, Package, DollarSign, BarChart3, Clock, Heart } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { Check, Calendar, Users, Package, DollarSign, BarChart3, Clock, PawPrint } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const Landing = () => {
@@ -85,10 +86,12 @@ const Landing = () => {
       {/* Header */}
       <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Heart className="h-6 w-6 text-primary" />
-            <span className="font-bold text-xl">PetCare ERP</span>
-          </div>
+          <Link to="/" className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <PawPrint className="h-4 w-4 text-primary" />
+            </div>
+            <span className="font-bold text-xl">Pet Pro Suite</span>
+          </Link>
           <nav className="hidden md:flex items-center gap-6">
             <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Recursos
@@ -111,7 +114,7 @@ const Landing = () => {
         <div className="container mx-auto px-4">
           <div className="max-w-3xl mx-auto text-center">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
-              <Heart className="h-4 w-4" />
+              <PawPrint className="h-4 w-4" />
               <span>Sistema completo para petshops e clínicas veterinárias</span>
             </div>
             <h1 className="text-4xl md:text-6xl font-bold mb-6 tracking-tight">
@@ -220,16 +223,45 @@ const Landing = () => {
       </section>
 
       {/* Footer */}
-      <footer className="border-t py-12 bg-card">
-        <div className="container mx-auto px-4">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Heart className="h-5 w-5 text-primary" />
-              <span className="font-semibold">PetCare ERP</span>
+      <footer className="border-t bg-card/50 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-12 md:py-16">
+          <div className="grid gap-10 md:grid-cols-4">
+            <div className="md:col-span-2 space-y-4">
+              <Link to="/" className="inline-flex items-center gap-2">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <PawPrint className="h-5 w-5 text-primary" />
+                </div>
+                <span className="font-bold text-lg">Pet Pro Suite</span>
+              </Link>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Sistema completo para petshops e clínicas veterinárias. Agendamento, atendimento, estoque e financeiro em uma plataforma moderna.
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              © 2024 PetCare ERP. Todos os direitos reservados.
-            </p>
+            <div>
+              <h4 className="font-semibold text-sm mb-4">Produto</h4>
+              <ul className="space-y-3 text-sm text-muted-foreground">
+                <li><a href="#features" className="hover:text-foreground transition-colors">Recursos</a></li>
+                <li><a href="#pricing" className="hover:text-foreground transition-colors">Planos</a></li>
+                <li><Link to="/auth" className="hover:text-foreground transition-colors">Entrar</Link></li>
+                <li><Link to="/auth" className="hover:text-foreground transition-colors">Começar grátis</Link></li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold text-sm mb-4">Legal</h4>
+              <ul className="space-y-3 text-sm text-muted-foreground">
+                <li><a href="#" className="hover:text-foreground transition-colors">Termos de Uso</a></li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Política de Privacidade</a></li>
+              </ul>
+            </div>
+          </div>
+          <Separator className="my-8" />
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
+            <p>© {new Date().getFullYear()} Pet Pro Suite. Todos os direitos reservados.</p>
+            <div className="flex items-center gap-2">
+              <a href="#" className="hover:text-foreground transition-colors">Privacidade</a>
+              <span aria-hidden>·</span>
+              <a href="#" className="hover:text-foreground transition-colors">Termos</a>
+            </div>
           </div>
         </div>
       </footer>

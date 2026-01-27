@@ -50,6 +50,49 @@ npm run dev
 - Click on "New codespace" to launch a new Codespace environment.
 - Edit files directly within the Codespace and commit and push your changes once you're done.
 
+## Acessando o banco de dados (Docker)
+
+O projeto inclui um PostgreSQL no Docker via `docker-compose.yml`. Para subir o banco:
+
+```sh
+docker compose up -d postgres
+```
+
+**Conexão:**
+
+| Parâmetro  | Valor        |
+|-----------|--------------|
+| Host      | `localhost`  |
+| Porta     | `5433`       |
+| Usuário   | `petpro`     |
+| Senha     | `petpro`     |
+| Database  | `petpro_dev` |
+
+**Via terminal (psql):**
+```sh
+PGPASSWORD=petpro psql -h localhost -p 5433 -U petpro -d petpro_dev
+```
+
+**Via cliente gráfico (DBeaver, pgAdmin, etc):**
+- Crie uma nova conexão PostgreSQL
+- Host: `localhost`, Porta: `5433`
+- Database: `petpro_dev`, User: `petpro`, Password: `petpro`
+
+**Criar as tabelas (migrations) no banco local:**
+
+Depois de subir o container, rode as migrations para criar plans, companies, profiles, etc.:
+
+```sh
+chmod +x scripts/apply-migrations-local.sh   # só na primeira vez
+./scripts/apply-migrations-local.sh
+# ou
+npm run db:migrate:local
+```
+
+Isso aplica o stub de `auth` (para compatibilidade com as migrations do Supabase) e as migrations em `supabase/migrations/`. O banco local fica com as mesmas tabelas e já com os planos padrão (Trial, Basic, Pro, Business).
+
+---
+
 ## What technologies are used for this project?
 
 This project is built with:
