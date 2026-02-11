@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Link } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import {
   LayoutDashboard,
   Users,
@@ -12,6 +13,7 @@ import {
   LifeBuoy,
   Send,
   Settings,
+  UserPlus,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -27,6 +29,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { getMe, type MeResponse } from "@/lib/api"
 
 const navMain = [
   {
@@ -79,7 +82,7 @@ const navMain = [
   },
 ]
 
-const navSecondary = [
+const navSecondaryBase = [
   { title: "Configurações", url: "/settings", icon: Settings },
   { title: "Support", url: "#", icon: LifeBuoy },
   { title: "Feedback", url: "#", icon: Send },
@@ -87,19 +90,34 @@ const navSecondary = [
 
 const defaultUser = {
   name: "Usuário",
-  email: "email@exemplo.com",
+  email: "",
   avatar: "",
 }
 
 export type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
   user?: { name: string; email: string; avatar?: string }
+  me?: MeResponse | null
 }
 
 export function AppSidebar({
-  user,
+  user: userProp,
+  me: meProp,
   ...props
 }: AppSidebarProps) {
-  const userData = user ?? defaultUser
+  const { data: meQuery } = useQuery({
+    queryKey: ["me"],
+    queryFn: getMe,
+    enabled: !meProp,
+    retry: false,
+  })
+  const me = meProp ?? meQuery
+  const userData = userProp ?? (me?.user
+    ? { name: me.user.full_name || "Usuário", email: me.user.email, avatar: "" }
+    : defaultUser)
+  const companyName = me?.company?.name ?? "Clínica Veterinária"
+  const navSecondary = me?.is_admin
+    ? [{ title: "Convidar", url: "/invite", icon: UserPlus }, ...navSecondaryBase]
+    : navSecondaryBase
 
   return (
     <Sidebar variant="inset" collapsible="icon" {...props}>
@@ -113,7 +131,7 @@ export function AppSidebar({
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">Pet Pro Suite</span>
-                  <span className="truncate text-xs text-muted-foreground">Clínica Veterinária</span>
+                  <span className="truncate text-xs text-muted-foreground">{companyName}</span>
                 </div>
               </Link>
             </SidebarMenuButton>

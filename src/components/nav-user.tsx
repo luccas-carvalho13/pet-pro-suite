@@ -1,6 +1,7 @@
 "use client"
 
 import { Link, useNavigate } from "react-router-dom"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   ChevronsUpDown,
   LogOut,
@@ -28,6 +29,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { toast } from "sonner"
+import { signOut } from "@/lib/api"
 
 export function NavUser({
   user,
@@ -40,6 +42,7 @@ export function NavUser({
 }) {
   const { isMobile } = useSidebar()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const initials = user.name
     .split(" ")
@@ -48,9 +51,11 @@ export function NavUser({
     .toUpperCase()
     .slice(0, 2)
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut()
+    queryClient.clear()
     toast.success("Logout realizado com sucesso!")
-    navigate("/")
+    navigate("/login", { replace: true })
   }
 
   return (

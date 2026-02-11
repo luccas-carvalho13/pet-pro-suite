@@ -14,6 +14,25 @@ export default {
   		}
   	},
   	extend: {
+  		fontFamily: {
+  			sans: ['"Inter"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+  			display: ['"Inter"', 'ui-sans-serif', 'system-ui', 'sans-serif']
+  		},
+      fontSize: {
+        xs: "0.688rem",
+        sm: "0.875rem",
+        base: "1rem",
+        lg: "1.286rem",
+        xl: "1.429rem",
+        "2xl": "1.714rem",
+        "3xl": "2.143rem",
+        "4xl": "2.571rem",
+        "5xl": "3.429rem",
+        "6xl": "4.571rem",
+        "7xl": "6.143rem",
+        "8xl": "8.286rem",
+        "9xl": "11.143rem",
+      },
   		colors: {
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',

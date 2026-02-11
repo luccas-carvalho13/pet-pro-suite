@@ -17,8 +17,13 @@ run_sql() {
 }
 
 run_sql < scripts/local/01_auth_stub.sql
-run_sql < supabase/migrations/20251118165030_76db8e99-fb51-4f20-8e9d-64c306df6d98.sql
-run_sql < supabase/migrations/20251118165110_821a1243-9d02-465e-826b-dcf69344ec42.sql
+run_sql < db/migrations/001_schema.sql
+run_sql < db/migrations/002_fix_search_path.sql
+run_sql < db/migrations/003_entities.sql
+run_sql < db/migrations/004_auth_encrypted_password.sql
+run_sql < db/migrations/005_settings.sql
+run_sql < db/migrations/006_user_security.sql
 run_sql < scripts/local/02_disable_rls_local.sql
+run_sql < db/seed.sql
 
-echo "Migrations aplicadas."
+echo "Migrations e seed aplicados."

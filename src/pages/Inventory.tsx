@@ -1,30 +1,83 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Plus, Search, Package, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
-import { useState } from "react";
+import { createProduct, deleteProduct, getProducts, updateProduct, type Product } from "@/lib/api";
+import { toast } from "sonner";
 
 const Inventory = () => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    category: "",
+    stock: 0,
+    min_stock: 0,
+    price: 0,
+    unit: "un",
+  });
+  const queryClient = useQueryClient();
+  const { data: products = [], isLoading, error } = useQuery({
+    queryKey: ["products"],
+    queryFn: getProducts,
+  });
+  const createMutation = useMutation({
+    mutationFn: createProduct,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      toast.success("Produto criado com sucesso!");
+      setDialogOpen(false);
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Erro ao criar produto.";
+      toast.error(msg);
+    },
+  });
+  const updateMutation = useMutation({
+    mutationFn: (payload: { id: string; data: { name: string; category: string; stock: number; min_stock: number; price: number; unit?: string } }) =>
+      updateProduct(payload.id, payload.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      toast.success("Produto atualizado com sucesso!");
+      setDialogOpen(false);
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Erro ao atualizar produto.";
+      toast.error(msg);
+    },
+  });
+  const deleteMutation = useMutation({
+    mutationFn: deleteProduct,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      toast.success("Produto removido.");
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Erro ao remover produto.";
+      toast.error(msg);
+    },
+  });
 
-  // Mock data
-  const products = [
-    { id: 1, name: "Ração Premium Cães", category: "Alimentos", stock: 45, minStock: 20, price: 159.90, status: "normal" },
-    { id: 2, name: "Ração Premium Gatos", category: "Alimentos", stock: 15, minStock: 20, price: 139.90, status: "low" },
-    { id: 3, name: "Shampoo Antipulgas", category: "Higiene", stock: 8, minStock: 15, price: 45.90, status: "critical" },
-    { id: 4, name: "Coleira Ajustável", category: "Acessórios", stock: 30, minStock: 10, price: 29.90, status: "normal" },
-    { id: 5, name: "Vacina Antirrábica", category: "Medicamentos", stock: 50, minStock: 25, price: 85.00, status: "normal" },
-    { id: 6, name: "Areia Sanitária", category: "Higiene", stock: 12, minStock: 20, price: 34.90, status: "low" },
-  ];
+  const filtered = products.filter(
+    (p: Product) =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.category ?? "").toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
+  const lowCount = products.filter((p: Product) => p.status === "low" || p.status === "critical").length;
   const stats = [
-    { label: "Total de Produtos", value: "156", icon: Package, color: "text-primary" },
-    { label: "Estoque Baixo", value: "12", icon: AlertTriangle, color: "text-orange-500" },
-    { label: "Entrada (Mês)", value: "+234", icon: TrendingUp, color: "text-green-500" },
-    { label: "Saída (Mês)", value: "-189", icon: TrendingDown, color: "text-red-500" },
+    { label: "Total de Produtos", value: String(products.length), icon: Package, color: "text-primary" },
+    { label: "Estoque Baixo", value: String(lowCount), icon: AlertTriangle, color: "text-orange-500" },
+    { label: "Entrada (Mês)", value: "–", icon: TrendingUp, color: "text-green-500" },
+    { label: "Saída (Mês)", value: "–", icon: TrendingDown, color: "text-red-500" },
   ];
 
   const getStockBadge = (status: string) => {
@@ -41,27 +94,34 @@ const Inventory = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold">Gestão de Estoque</h1>
             <p className="text-muted-foreground">Controle completo de produtos e movimentações</p>
           </div>
-          <Button className="gap-2">
+          <Button
+            className="gap-2 w-full sm:w-auto"
+            onClick={() => {
+              setEditing(null);
+              setForm({ name: "", category: "", stock: 0, min_stock: 0, price: 0, unit: "un" });
+              setDialogOpen(true);
+            }}
+          >
             <Plus className="h-4 w-4" />
             Adicionar Produto
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
-          {stats.map((stat) => (
-            <Card key={stat.label}>
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+          {stats.map((s) => (
+            <Card key={s.label}>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className="text-2xl font-bold mt-1">{stat.value}</p>
+                    <p className="text-sm text-muted-foreground">{s.label}</p>
+                    <p className="text-2xl font-bold mt-1">{s.value}</p>
                   </div>
-                  <stat.icon className={`h-8 w-8 ${stat.color}`} />
+                  <s.icon className={`h-8 w-8 ${s.color}`} />
                 </div>
               </CardContent>
             </Card>
@@ -85,37 +145,145 @@ const Inventory = () => {
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Produto</TableHead>
-                  <TableHead>Categoria</TableHead>
-                  <TableHead className="text-center">Estoque</TableHead>
-                  <TableHead className="text-center">Mínimo</TableHead>
-                  <TableHead className="text-right">Preço</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {products.map((product) => (
-                  <TableRow key={product.id}>
-                    <TableCell className="font-medium">{product.name}</TableCell>
-                    <TableCell>{product.category}</TableCell>
-                    <TableCell className="text-center">{product.stock}</TableCell>
-                    <TableCell className="text-center">{product.minStock}</TableCell>
-                    <TableCell className="text-right">R$ {product.price.toFixed(2)}</TableCell>
-                    <TableCell className="text-center">{getStockBadge(product.status)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="sm">Editar</Button>
-                    </TableCell>
+            {error && <p className="text-destructive text-sm">Erro ao carregar produtos.</p>}
+            {isLoading ? (
+              <p className="text-muted-foreground text-sm">Carregando...</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Produto</TableHead>
+                    <TableHead className="hidden md:table-cell">Categoria</TableHead>
+                    <TableHead className="text-center">Estoque</TableHead>
+                    <TableHead className="text-center hidden lg:table-cell">Mínimo</TableHead>
+                    <TableHead className="text-right">Preço</TableHead>
+                    <TableHead className="text-center hidden md:table-cell">Status</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((p: Product) => (
+                    <TableRow key={p.id}>
+                      <TableCell className="font-medium">{p.name}</TableCell>
+                      <TableCell className="hidden md:table-cell">{p.category}</TableCell>
+                      <TableCell className="text-center">{p.stock}</TableCell>
+                      <TableCell className="text-center hidden lg:table-cell">{p.minStock}</TableCell>
+                      <TableCell className="text-right">R$ {Number(p.price).toFixed(2)}</TableCell>
+                      <TableCell className="text-center hidden md:table-cell">{getStockBadge(p.status)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditing(p);
+                              setForm({
+                                name: p.name,
+                                category: p.category,
+                                stock: p.stock,
+                                min_stock: p.minStock,
+                                price: p.price,
+                                unit: "un",
+                              });
+                              setDialogOpen(true);
+                            }}
+                          >
+                            Editar
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (window.confirm("Remover este produto?")) deleteMutation.mutate(p.id);
+                            }}
+                          >
+                            Excluir
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editing ? "Editar produto" : "Adicionar produto"}</DialogTitle>
+            <DialogDescription>Preencha os dados do produto.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="space-y-1.5">
+              <Label>Nome</Label>
+              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Categoria</Label>
+              <Input value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Estoque</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.stock}
+                  onChange={(e) => setForm((f) => ({ ...f, stock: Number(e.target.value) }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Mínimo</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.min_stock}
+                  onChange={(e) => setForm((f) => ({ ...f, min_stock: Number(e.target.value) }))}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Preço</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={form.price}
+                  onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Unidade</Label>
+                <Input
+                  value={form.unit}
+                  onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                if (!form.name.trim()) return toast.error("Nome é obrigatório.");
+                if (!form.category.trim()) return toast.error("Categoria é obrigatória.");
+                if (form.price < 0) return toast.error("Preço inválido.");
+                if (editing) {
+                  updateMutation.mutate({ id: editing.id, data: form });
+                } else {
+                  createMutation.mutate(form);
+                }
+              }}
+              disabled={createMutation.isPending || updateMutation.isPending}
+            >
+              {editing ? "Salvar" : "Criar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };

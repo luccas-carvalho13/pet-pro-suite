@@ -190,7 +190,7 @@ CREATE POLICY "Admins podem gerenciar roles da empresa"
   ON public.user_roles FOR ALL
   TO authenticated
   USING (
-    public.has_role(auth.uid(), 'admin') 
+    public.has_role(auth.uid(), 'admin')
     AND company_id = public.get_user_company_id(auth.uid())
   );
 
@@ -209,7 +209,7 @@ CREATE POLICY "Admins podem gerenciar permissões da empresa"
   ON public.permissions FOR ALL
   TO authenticated
   USING (
-    public.has_role(auth.uid(), 'admin') 
+    public.has_role(auth.uid(), 'admin')
     AND company_id = public.get_user_company_id(auth.uid())
   );
 

@@ -1,23 +1,76 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Scissors, Stethoscope, Bath, Syringe } from "lucide-react";
-import { useState } from "react";
+import { createService, deleteService, getServices, updateService, type Service } from "@/lib/api";
+import { toast } from "sonner";
 
 const Services = () => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Service | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    category: "Veterinário",
+    duration_minutes: 30,
+    price: 0,
+    commission_pct: 0,
+  });
+  const queryClient = useQueryClient();
+  const { data: services = [], isLoading, error } = useQuery({
+    queryKey: ["services"],
+    queryFn: getServices,
+  });
+  const createMutation = useMutation({
+    mutationFn: createService,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["services"] });
+      toast.success("Serviço criado com sucesso!");
+      setDialogOpen(false);
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Erro ao criar serviço.";
+      toast.error(msg);
+    },
+  });
+  const updateMutation = useMutation({
+    mutationFn: (payload: { id: string; data: { name: string; category: string; duration_minutes: number; price: number; commission_pct?: number } }) =>
+      updateService(payload.id, payload.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["services"] });
+      toast.success("Serviço atualizado com sucesso!");
+      setDialogOpen(false);
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Erro ao atualizar serviço.";
+      toast.error(msg);
+    },
+  });
+  const deleteMutation = useMutation({
+    mutationFn: deleteService,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["services"] });
+      toast.success("Serviço removido.");
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Erro ao remover serviço.";
+      toast.error(msg);
+    },
+  });
 
-  const services = [
-    { id: 1, name: "Consulta Veterinária", category: "Veterinário", duration: "30 min", price: 150.00, commission: 40 },
-    { id: 2, name: "Banho e Tosa Pequeno Porte", category: "Estética", duration: "60 min", price: 80.00, commission: 50 },
-    { id: 3, name: "Banho e Tosa Grande Porte", category: "Estética", duration: "90 min", price: 120.00, commission: 50 },
-    { id: 4, name: "Vacinação V10", category: "Veterinário", duration: "15 min", price: 90.00, commission: 30 },
-    { id: 5, name: "Tosa Higiênica", category: "Estética", duration: "30 min", price: 50.00, commission: 50 },
-    { id: 6, name: "Cirurgia Castração", category: "Veterinário", duration: "120 min", price: 600.00, commission: 35 },
-  ];
+  const filtered = services.filter(
+    (s: Service) =>
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (s.category ?? "").toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const getCategoryIcon = (category: string) => {
     switch (category) {
@@ -42,36 +95,43 @@ const Services = () => {
   };
 
   const stats = [
-    { label: "Total de Serviços", value: "24", icon: Stethoscope, color: "text-primary" },
-    { label: "Serviços Veterinários", value: "12", icon: Syringe, color: "text-primary" },
-    { label: "Serviços Estética", value: "8", icon: Scissors, color: "text-secondary" },
-    { label: "Outros Serviços", value: "4", icon: Bath, color: "text-muted-foreground" },
+    { label: "Total de Serviços", value: String(services.length), icon: Stethoscope, color: "text-primary" },
+    { label: "Veterinários", value: String(services.filter((s: Service) => s.category === "Veterinário").length), icon: Syringe, color: "text-primary" },
+    { label: "Estética", value: String(services.filter((s: Service) => s.category === "Estética").length), icon: Scissors, color: "text-secondary" },
+    { label: "Outros", value: String(services.filter((s: Service) => s.category !== "Veterinário" && s.category !== "Estética").length), icon: Bath, color: "text-muted-foreground" },
   ];
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold">Gestão de Serviços</h1>
             <p className="text-muted-foreground">Cadastro e controle de serviços oferecidos</p>
           </div>
-          <Button className="gap-2">
+          <Button
+            className="gap-2 w-full sm:w-auto"
+            onClick={() => {
+              setEditing(null);
+              setForm({ name: "", category: "Veterinário", duration_minutes: 30, price: 0, commission_pct: 0 });
+              setDialogOpen(true);
+            }}
+          >
             <Plus className="h-4 w-4" />
             Novo Serviço
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
-          {stats.map((stat) => (
-            <Card key={stat.label}>
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+          {stats.map((s) => (
+            <Card key={s.label}>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className="text-2xl font-bold mt-1">{stat.value}</p>
+                    <p className="text-sm text-muted-foreground">{s.label}</p>
+                    <p className="text-2xl font-bold mt-1">{s.value}</p>
                   </div>
-                  <stat.icon className={`h-8 w-8 ${stat.color}`} />
+                  <s.icon className={`h-8 w-8 ${s.color}`} />
                 </div>
               </CardContent>
             </Card>
@@ -95,40 +155,145 @@ const Services = () => {
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Serviço</TableHead>
-                  <TableHead>Categoria</TableHead>
-                  <TableHead className="text-center">Duração</TableHead>
-                  <TableHead className="text-right">Preço</TableHead>
-                  <TableHead className="text-center">Comissão</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {services.map((service) => (
-                  <TableRow key={service.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        {getCategoryIcon(service.category)}
-                        {service.name}
-                      </div>
-                    </TableCell>
-                    <TableCell>{getCategoryBadge(service.category)}</TableCell>
-                    <TableCell className="text-center">{service.duration}</TableCell>
-                    <TableCell className="text-right">R$ {service.price.toFixed(2)}</TableCell>
-                    <TableCell className="text-center">{service.commission}%</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="sm">Editar</Button>
-                    </TableCell>
+            {error && <p className="text-destructive text-sm">Erro ao carregar serviços.</p>}
+            {isLoading ? (
+              <p className="text-muted-foreground text-sm">Carregando...</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Serviço</TableHead>
+                    <TableHead className="hidden md:table-cell">Categoria</TableHead>
+                    <TableHead className="text-center hidden md:table-cell">Duração</TableHead>
+                    <TableHead className="text-right">Preço</TableHead>
+                    <TableHead className="text-center hidden lg:table-cell">Comissão</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((s: Service) => (
+                    <TableRow key={s.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          {getCategoryIcon(s.category)}
+                          {s.name}
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">{getCategoryBadge(s.category)}</TableCell>
+                      <TableCell className="text-center hidden md:table-cell">{s.duration}</TableCell>
+                      <TableCell className="text-right">R$ {Number(s.price).toFixed(2)}</TableCell>
+                      <TableCell className="text-center hidden lg:table-cell">{s.commission}%</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditing(s);
+                              setForm({
+                                name: s.name,
+                                category: s.category,
+                                duration_minutes: Number(s.duration.replace(" min", "")) || 30,
+                                price: s.price,
+                                commission_pct: s.commission,
+                              });
+                              setDialogOpen(true);
+                            }}
+                          >
+                            Editar
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (window.confirm("Remover este serviço?")) deleteMutation.mutate(s.id);
+                            }}
+                          >
+                            Excluir
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editing ? "Editar serviço" : "Novo serviço"}</DialogTitle>
+            <DialogDescription>Preencha os dados do serviço.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="space-y-1.5">
+              <Label>Nome</Label>
+              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Categoria</Label>
+              <Select value={form.category} onValueChange={(v) => setForm((f) => ({ ...f, category: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Veterinário">Veterinário</SelectItem>
+                  <SelectItem value="Estética">Estética</SelectItem>
+                  <SelectItem value="Banho">Banho</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Duração (min)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={form.duration_minutes}
+                  onChange={(e) => setForm((f) => ({ ...f, duration_minutes: Number(e.target.value) }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Comissão (%)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.commission_pct}
+                  onChange={(e) => setForm((f) => ({ ...f, commission_pct: Number(e.target.value) }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Preço</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.price}
+                onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                if (!form.name.trim()) return toast.error("Nome é obrigatório.");
+                if (!form.category.trim()) return toast.error("Categoria é obrigatória.");
+                if (form.price < 0) return toast.error("Preço inválido.");
+                if (editing) {
+                  updateMutation.mutate({ id: editing.id, data: form });
+                } else {
+                  createMutation.mutate(form);
+                }
+              }}
+              disabled={createMutation.isPending || updateMutation.isPending}
+            >
+              {editing ? "Salvar" : "Criar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };

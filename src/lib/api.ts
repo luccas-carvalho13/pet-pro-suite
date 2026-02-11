@@ -1,0 +1,436 @@
+import { addClientLog } from './client-logs';
+
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
+
+const CONNECTION_MSG =
+  'Serviço indisponível. Verifique se a API está rodando (ex.: docker compose up ou npm run dev na pasta server).';
+
+function isNetworkError(err: unknown): boolean {
+  if (err instanceof TypeError && err.message === 'Failed to fetch') return true;
+  if (err && typeof err === 'object' && 'message' in err) {
+    const m = String((err as { message: string }).message);
+    return /failed to fetch|network error|connection refused|err_connection_refused/i.test(m);
+  }
+  return false;
+}
+
+export type AuthUser = { id: string; email: string; full_name: string };
+
+function getToken(): string | null {
+  return localStorage.getItem('petpro_token');
+}
+
+function setToken(token: string) {
+  localStorage.setItem('petpro_token', token);
+}
+
+export function clearToken() {
+  localStorage.removeItem('petpro_token');
+}
+
+export async function signIn(email: string, password: string): Promise<{ token: string; user: AuthUser }> {
+  try {
+    const res = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao entrar.');
+    setToken(data.token);
+    return { token: data.token, user: data.user };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    addClientLog(`POST /auth/login falhou`, msg);
+    if (isNetworkError(err)) throw new Error(CONNECTION_MSG);
+    throw err;
+  }
+}
+
+export type SignUpPayload = {
+  company_name: string;
+  company_cnpj: string;
+  company_phone: string;
+  company_address: string;
+  full_name: string;
+  user_phone: string;
+  email: string;
+  password: string;
+};
+
+export async function signUp(payload: SignUpPayload): Promise<{ token: string; user: AuthUser }> {
+  try {
+    const res = await fetch(`${API_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_name: payload.company_name,
+        company_cnpj: payload.company_cnpj,
+        company_phone: payload.company_phone,
+        company_address: payload.company_address,
+        full_name: payload.full_name,
+        user_phone: payload.user_phone,
+        email: payload.email,
+        password: payload.password,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao criar conta.');
+    setToken(data.token);
+    return { token: data.token, user: data.user };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    addClientLog(`POST /auth/register falhou`, msg);
+    if (isNetworkError(err)) throw new Error(CONNECTION_MSG);
+    throw err;
+  }
+}
+
+export async function checkEmailAvailable(email: string): Promise<boolean> {
+  const e = email.trim().toLowerCase();
+  if (!e) return false;
+  try {
+    const res = await fetch(`${API_URL}/auth/check-email?email=${encodeURIComponent(e)}`);
+    if (!res.ok) {
+      addClientLog(`GET /auth/check-email → ${res.status}`, 'Verificação de e-mail indisponível.');
+      // Não bloquear o cadastro se a API de checagem estiver fora.
+      return true;
+    }
+    const data = await res.json().catch(() => ({}));
+    return (data as { available?: boolean }).available === true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    addClientLog(`GET /auth/check-email falhou`, msg);
+    // Em erro de rede, deixa seguir e o /auth/register valida de verdade.
+    return true;
+  }
+}
+
+export async function signOut(): Promise<void> {
+  clearToken();
+}
+
+export type Company = { id: string; name: string };
+
+export async function getCurrentUser(): Promise<AuthUser | null> {
+  const token = getToken();
+  if (!token) return null;
+  const res = await fetch(`${API_URL}/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.user ?? null;
+}
+
+export type MeResponse = { user: AuthUser; company: Company | null; is_admin: boolean };
+
+export async function getMe(): Promise<MeResponse | null> {
+  const token = getToken();
+  if (!token) return null;
+  const res = await fetch(`${API_URL}/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) {
+    clearToken();
+    return null;
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return {
+    user: data.user,
+    company: data.company ?? null,
+    is_admin: !!data.is_admin,
+  };
+}
+
+export type InvitePayload = { full_name: string; email: string; phone: string; password: string };
+
+export async function inviteUser(payload: InvitePayload): Promise<{ user: AuthUser }> {
+  const res = await fetch(`${API_URL}/api/invite`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      full_name: payload.full_name.trim(),
+      email: payload.email.trim(),
+      phone: payload.phone.trim(),
+      password: payload.password,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao convidar.');
+  return { user: data.user };
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    'Content-Type': 'application/json',
+  };
+}
+
+async function apiRequest<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown): Promise<T> {
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers: authHeaders(),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 401) {
+        clearToken();
+        const msg = (data as { error?: string }).error ?? 'Sessão expirada. Faça login novamente.';
+        addClientLog(`${method} ${path} → ${res.status}`, msg);
+        throw new Error(msg);
+      }
+      const msg = (data as { error?: string }).error ?? `HTTP ${res.status}`;
+      addClientLog(`${method} ${path} → ${res.status}`, msg);
+      throw new Error(msg);
+    }
+    return data as T;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    addClientLog(`${method} ${path} falhou`, msg);
+    throw err;
+  }
+}
+
+async function apiGet<T>(path: string): Promise<T> {
+  try {
+    const res = await fetch(`${API_URL}${path}`, { headers: authHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 401) {
+        clearToken();
+        const msg = (data as { error?: string }).error ?? 'Sessão expirada. Faça login novamente.';
+        addClientLog(`GET ${path} → ${res.status}`, msg);
+        throw new Error(msg);
+      }
+      const msg = (data as { error?: string }).error ?? `HTTP ${res.status}`;
+      addClientLog(`GET ${path} → ${res.status}`, msg);
+      throw new Error(msg);
+    }
+    return data as T;
+  } catch (err) {
+    if (err instanceof Error && !err.message.startsWith('HTTP')) {
+      addClientLog(`GET ${path} falhou`, err.message);
+    }
+    throw err;
+  }
+}
+
+export type DashboardStats = {
+  stats: { title: string; value: string; change: string; icon: string }[];
+  upcomingAppointments: { time: string; client: string; pet: string; service: string }[];
+  lowStockItems: { name: string; quantity: number; min: number }[];
+};
+export async function getDashboardStats(): Promise<DashboardStats> {
+  return apiGet<DashboardStats>('/api/dashboard-stats');
+}
+
+export type Client = { id: string; name: string; email: string | null; phone: string | null; address?: string | null; pets: number; lastVisit: string; status: string };
+export async function getClients(): Promise<Client[]> {
+  return apiGet<Client[]>('/api/clients');
+}
+
+export type ClientPayload = { name: string; email?: string; phone?: string; address?: string };
+export async function createClient(payload: ClientPayload): Promise<Client> {
+  return apiRequest<Client>('/api/clients', 'POST', payload);
+}
+export async function updateClient(id: string, payload: ClientPayload): Promise<Client> {
+  return apiRequest<Client>(`/api/clients/${id}`, 'PUT', payload);
+}
+export async function deleteClient(id: string): Promise<void> {
+  await apiRequest<void>(`/api/clients/${id}`, 'DELETE');
+}
+
+export type Pet = { id: string; client_id: string; name: string; species: string; breed: string; birth_date?: string | null; age: string; owner: string; lastVisit: string; status: string };
+export async function getPets(): Promise<Pet[]> {
+  return apiGet<Pet[]>('/api/pets');
+}
+
+export type PetPayload = { client_id: string; name: string; species: string; breed?: string; birth_date?: string };
+export async function createPet(payload: PetPayload): Promise<Pet> {
+  return apiRequest<Pet>('/api/pets', 'POST', payload);
+}
+export async function updatePet(id: string, payload: PetPayload): Promise<Pet> {
+  return apiRequest<Pet>(`/api/pets/${id}`, 'PUT', payload);
+}
+export async function deletePet(id: string): Promise<void> {
+  await apiRequest<void>(`/api/pets/${id}`, 'DELETE');
+}
+
+export type Service = { id: string; name: string; category: string; duration: string; price: number; commission: number };
+export async function getServices(): Promise<Service[]> {
+  return apiGet<Service[]>('/api/services');
+}
+
+export type ServicePayload = { name: string; category: string; duration_minutes: number; price: number; commission_pct?: number };
+export async function createService(payload: ServicePayload): Promise<Service> {
+  return apiRequest<Service>('/api/services', 'POST', payload);
+}
+export async function updateService(id: string, payload: ServicePayload): Promise<Service> {
+  return apiRequest<Service>(`/api/services/${id}`, 'PUT', payload);
+}
+export async function deleteService(id: string): Promise<void> {
+  await apiRequest<void>(`/api/services/${id}`, 'DELETE');
+}
+
+export type Product = { id: string; name: string; category: string; stock: number; minStock: number; price: number; status: string };
+export async function getProducts(): Promise<Product[]> {
+  return apiGet<Product[]>('/api/products');
+}
+
+export type ProductPayload = { name: string; category: string; stock: number; min_stock: number; price: number; unit?: string };
+export async function createProduct(payload: ProductPayload): Promise<Product> {
+  return apiRequest<Product>('/api/products', 'POST', payload);
+}
+export async function updateProduct(id: string, payload: ProductPayload): Promise<Product> {
+  return apiRequest<Product>(`/api/products/${id}`, 'PUT', payload);
+}
+export async function deleteProduct(id: string): Promise<void> {
+  await apiRequest<void>(`/api/products/${id}`, 'DELETE');
+}
+
+export type Appointment = { id: string; client_id: string; pet_id: string; service_id: string; scheduledAt: string; time: string; duration: string; client: string; pet: string; petType: string; service: string; status: string; vet: string };
+export async function getAppointments(): Promise<Appointment[]> {
+  return apiGet<Appointment[]>('/api/appointments');
+}
+
+export type AppointmentPayload = { client_id: string; pet_id: string; service_id: string; scheduled_at: string; duration_minutes: number; status?: string; vet_name?: string; notes?: string };
+export async function createAppointment(payload: AppointmentPayload): Promise<Appointment> {
+  return apiRequest<Appointment>('/api/appointments', 'POST', payload);
+}
+export async function updateAppointment(id: string, payload: AppointmentPayload): Promise<Appointment> {
+  return apiRequest<Appointment>(`/api/appointments/${id}`, 'PUT', payload);
+}
+export async function deleteAppointment(id: string): Promise<void> {
+  await apiRequest<void>(`/api/appointments/${id}`, 'DELETE');
+}
+
+export type TransactionRevenue = { id: string; date: string; description: string; type: string; value: number; status: string };
+export type TransactionExpense = { id: string; date: string; description: string; category: string; value: number };
+export type TransactionsData = { revenues: TransactionRevenue[]; expenses: TransactionExpense[]; stats: { label: string; value: string; icon: string }[] };
+export async function getTransactions(): Promise<TransactionsData> {
+  return apiGet<TransactionsData>('/api/transactions');
+}
+
+export type TransactionPayload = { type: 'revenue' | 'expense'; date: string; description: string; category?: string; value: number; status?: string };
+export async function createTransaction(payload: TransactionPayload): Promise<TransactionRevenue | TransactionExpense> {
+  return apiRequest<TransactionRevenue | TransactionExpense>('/api/transactions', 'POST', payload);
+}
+export async function updateTransaction(id: string, payload: TransactionPayload): Promise<TransactionRevenue | TransactionExpense> {
+  return apiRequest<TransactionRevenue | TransactionExpense>(`/api/transactions/${id}`, 'PUT', payload);
+}
+export async function deleteTransaction(id: string): Promise<void> {
+  await apiRequest<void>(`/api/transactions/${id}`, 'DELETE');
+}
+
+export type CompanyListItem = { id: string; name: string; plan: string; plan_id?: string | null; users: number; status: string; mrr: number; created: string };
+export async function getCompanies(): Promise<CompanyListItem[]> {
+  return apiGet<CompanyListItem[]>('/api/companies');
+}
+
+export type CompanySettings = {
+  name: string;
+  cnpj: string;
+  phone: string;
+  address: string;
+  contact_email: string;
+  website: string;
+  hours: string;
+};
+export async function getCompanySettings(): Promise<CompanySettings> {
+  return apiGet<CompanySettings>('/api/settings/company');
+}
+export async function updateCompanySettings(payload: CompanySettings): Promise<void> {
+  await apiRequest<void>('/api/settings/company', 'PUT', payload);
+}
+
+export type NotificationSettings = {
+  reminders: boolean;
+  low_stock: boolean;
+  payment_receipt: boolean;
+  pet_birthday: boolean;
+};
+export async function getNotificationSettings(): Promise<NotificationSettings> {
+  return apiGet<NotificationSettings>('/api/settings/notifications');
+}
+export async function updateNotificationSettings(payload: NotificationSettings): Promise<void> {
+  await apiRequest<void>('/api/settings/notifications', 'PUT', payload);
+}
+
+export type AppearanceSettings = {
+  theme: string;
+  primary_color: string;
+  logo_url: string;
+};
+export async function getAppearanceSettings(): Promise<AppearanceSettings> {
+  return apiGet<AppearanceSettings>('/api/settings/appearance');
+}
+export async function updateAppearanceSettings(payload: AppearanceSettings): Promise<void> {
+  await apiRequest<void>('/api/settings/appearance', 'PUT', payload);
+}
+
+export type SecuritySettings = { two_factor_enabled: boolean };
+export async function getSecuritySettings(): Promise<SecuritySettings> {
+  return apiGet<SecuritySettings>('/api/settings/security');
+}
+export async function updateSecuritySettings(payload: SecuritySettings): Promise<void> {
+  await apiRequest<void>('/api/settings/security', 'PUT', payload);
+}
+
+export type CompanyUser = { id: string; name: string; email: string; role: string };
+export async function getCompanyUsers(): Promise<CompanyUser[]> {
+  return apiGet<CompanyUser[]>('/api/settings/users');
+}
+export async function updateCompanyUserRole(id: string, role: string): Promise<void> {
+  await apiRequest<void>(`/api/settings/users/${id}`, 'PUT', { role });
+}
+
+export async function changePassword(current_password: string, new_password: string): Promise<void> {
+  await apiRequest<void>('/auth/change-password', 'POST', { current_password, new_password });
+}
+
+export async function getCompanyUser(id: string): Promise<CompanyUser> {
+  return apiGet<CompanyUser>(`/api/settings/users/${id}`);
+}
+
+export type Plan = {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  trial_days: number;
+  max_users: number | null;
+  max_pets: number | null;
+  is_active: boolean;
+};
+export async function getPlans(): Promise<Plan[]> {
+  return apiGet<Plan[]>('/api/admin/plans');
+}
+export async function updatePlan(id: string, payload: Omit<Plan, 'id'>): Promise<Plan> {
+  return apiRequest<Plan>(`/api/admin/plans/${id}`, 'PUT', payload);
+}
+
+export type AdminCompanyPayload = { name: string; cnpj?: string; phone?: string; address?: string; status?: string; current_plan_id?: string | null };
+export async function createCompany(payload: AdminCompanyPayload): Promise<{ id: string; name: string; status: string; created_at: string }> {
+  return apiRequest<{ id: string; name: string; status: string; created_at: string }>(`/api/admin/companies`, 'POST', payload);
+}
+export async function updateCompany(id: string, payload: AdminCompanyPayload): Promise<{ id: string; name: string; status: string; created_at: string }> {
+  return apiRequest<{ id: string; name: string; status: string; created_at: string }>(`/api/admin/companies/${id}`, 'PUT', payload);
+}
+
+export async function exportReport(type: 'clients' | 'financial' | 'inventory' | 'services'): Promise<Blob> {
+  const res = await fetch(`${API_URL}/api/reports/export?type=${type}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.blob();
+}
+
+export async function exportCompanies(): Promise<Blob> {
+  const res = await fetch(`${API_URL}/api/admin/export/companies`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.blob();
+}

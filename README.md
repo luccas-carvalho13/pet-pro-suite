@@ -50,15 +50,41 @@ npm run dev
 - Click on "New codespace" to launch a new Codespace environment.
 - Edit files directly within the Codespace and commit and push your changes once you're done.
 
-## Acessando o banco de dados (Docker)
+## Rodando o projeto (Postgres + API no Docker)
 
-O projeto inclui um PostgreSQL no Docker via `docker-compose.yml`. Para subir o banco:
+O projeto usa **PostgreSQL** e uma **API Node** direto no Docker — sem Supabase.
+
+**1. Subir Postgres e API:**
 
 ```sh
-docker compose up -d postgres
+docker compose up -d
 ```
 
-**Conexão:**
+> Se no login aparecer "Serviço indisponível" ou `ERR_CONNECTION_REFUSED`, a API não está rodando. Suba com `docker compose up -d` ou rode a API na pasta `server/` com `npm run dev`.
+
+**2. Aplicar migrations e seed no Postgres:**
+
+```sh
+chmod +x scripts/apply-migrations-local.sh   # só na primeira vez
+./scripts/apply-migrations-local.sh
+# ou
+npm run db:migrate:local
+```
+
+Isso aplica o stub de `auth`, as migrations em `db/migrations/` e o seed em `db/seed.sql` (empresa demo + 3 usuários: usuario / admin / super, senha **Senha123!**).
+
+**3. Rodar o frontend:**
+
+```sh
+npm i
+npm run dev
+```
+
+O front chama a API em `http://localhost:3001` (configurável via `VITE_API_URL` no `.env`).
+
+---
+
+**Conexão Postgres:**
 
 | Parâmetro  | Valor        |
 |-----------|--------------|
@@ -68,28 +94,9 @@ docker compose up -d postgres
 | Senha     | `petpro`     |
 | Database  | `petpro_dev` |
 
-**Via terminal (psql):**
-```sh
-PGPASSWORD=petpro psql -h localhost -p 5433 -U petpro -d petpro_dev
-```
+**API:** `http://localhost:3001` (login, register, me)
 
-**Via cliente gráfico (DBeaver, pgAdmin, etc):**
-- Crie uma nova conexão PostgreSQL
-- Host: `localhost`, Porta: `5433`
-- Database: `petpro_dev`, User: `petpro`, Password: `petpro`
-
-**Criar as tabelas (migrations) no banco local:**
-
-Depois de subir o container, rode as migrations para criar plans, companies, profiles, etc.:
-
-```sh
-chmod +x scripts/apply-migrations-local.sh   # só na primeira vez
-./scripts/apply-migrations-local.sh
-# ou
-npm run db:migrate:local
-```
-
-Isso aplica o stub de `auth` (para compatibilidade com as migrations do Supabase) e as migrations em `supabase/migrations/`. O banco local fica com as mesmas tabelas e já com os planos padrão (Trial, Basic, Pro, Business).
+**Usuários do seed:** `usuario@petpro.local` | `admin@petpro.local` | `super@petpro.local` → senha **Senha123!**
 
 ---
 

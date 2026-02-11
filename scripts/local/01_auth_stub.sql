@@ -4,11 +4,15 @@
 CREATE SCHEMA IF NOT EXISTS auth;
 
 -- Tabela mínima compatível com as FKs (profiles.id -> auth.users.id, user_roles.user_id -> auth.users.id)
+-- encrypted_password: hash bcrypt da senha (igual ao Supabase/GoTrue)
 CREATE TABLE IF NOT EXISTS auth.users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT,
-  raw_user_meta_data JSONB DEFAULT '{}'
+  raw_user_meta_data JSONB DEFAULT '{}',
+  encrypted_password TEXT
 );
+-- Garante a coluna em tabelas já existentes
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS encrypted_password TEXT;
 
 -- Role usada pelas políticas RLS "TO authenticated"
 DO $$

@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Check, Calendar, Users, Package, DollarSign, BarChart3, Clock, PawPrint } from "lucide-react";
@@ -80,11 +81,16 @@ const Landing = () => {
       ],
     },
   ];
+  const stats = [
+    { label: "Clínicas ativas", value: "+240" },
+    { label: "Agendamentos/mês", value: "+18k" },
+    { label: "Satisfação", value: "4.9/5" },
+  ];
 
   return (
     <div className="min-h-screen">
       {/* Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b bg-background/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -99,10 +105,10 @@ const Landing = () => {
             <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Planos
             </a>
-            <Link to="/auth">
+            <Link to="/login">
               <Button variant="outline" size="sm">Entrar</Button>
             </Link>
-            <Link to="/auth">
+            <Link to="/register">
               <Button size="sm" className="gradient-primary">Começar Grátis</Button>
             </Link>
           </nav>
@@ -110,13 +116,13 @@ const Landing = () => {
       </header>
 
       {/* Hero Section */}
-      <section className="py-20 md:py-32 gradient-subtle">
+      <section className="py-20 md:py-32 bg-hero">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl mx-auto text-center">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
+            <Badge variant="secondary" className="mb-6 gap-2 px-4 py-2 text-sm">
               <PawPrint className="h-4 w-4" />
               <span>Sistema completo para petshops e clínicas veterinárias</span>
-            </div>
+            </Badge>
             <h1 className="text-4xl md:text-6xl font-bold mb-6 tracking-tight">
               Gerencie sua clínica com{" "}
               <span className="gradient-primary bg-clip-text text-transparent">simplicidade</span>
@@ -126,7 +132,7 @@ const Landing = () => {
               Mais tempo cuidando dos pets, menos tempo com burocracia.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/auth">
+              <Link to="/register">
                 <Button size="lg" className="gradient-primary shadow-primary text-base">
                   Começar Gratuitamente
                 </Button>
@@ -135,12 +141,22 @@ const Landing = () => {
                 Ver Demonstração
               </Button>
             </div>
+            <div className="mt-10 grid gap-4 sm:grid-cols-3">
+              {stats.map((stat) => (
+                <Card key={stat.label} className="border-border/60 bg-card/80">
+                  <CardContent className="pt-6">
+                    <p className="text-2xl font-bold">{stat.value}</p>
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
       {/* Features Section */}
-      <section id="features" className="py-20 bg-background">
+      <section id="features" className="py-20 bg-background bg-grid">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
@@ -152,7 +168,7 @@ const Landing = () => {
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {features.map((feature) => (
-              <Card key={feature.title} className="border-2 hover:border-primary/50 transition-all hover:shadow-md">
+              <Card key={feature.title} className="border-2 hover:border-primary/50 transition-all hover:shadow-md bg-card/90">
                 <CardHeader>
                   <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
                     <feature.icon className="h-6 w-6 text-primary" />
@@ -207,7 +223,7 @@ const Landing = () => {
                       </li>
                     ))}
                   </ul>
-                  <Link to="/auth">
+                  <Link to="/register">
                     <Button 
                       className={`w-full ${plan.popular ? 'gradient-primary' : ''}`}
                       variant={plan.popular ? 'default' : 'outline'}
@@ -242,8 +258,8 @@ const Landing = () => {
               <ul className="space-y-3 text-sm text-muted-foreground">
                 <li><a href="#features" className="hover:text-foreground transition-colors">Recursos</a></li>
                 <li><a href="#pricing" className="hover:text-foreground transition-colors">Planos</a></li>
-                <li><Link to="/auth" className="hover:text-foreground transition-colors">Entrar</Link></li>
-                <li><Link to="/auth" className="hover:text-foreground transition-colors">Começar grátis</Link></li>
+                <li><Link to="/login" className="hover:text-foreground transition-colors">Entrar</Link></li>
+                <li><Link to="/register" className="hover:text-foreground transition-colors">Começar grátis</Link></li>
               </ul>
             </div>
             <div>
