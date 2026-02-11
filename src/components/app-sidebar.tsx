@@ -5,8 +5,10 @@ import {
   LayoutDashboard,
   Users,
   Calendar,
+  BellRing,
   Package,
   DollarSign,
+  Wallet,
   Stethoscope,
   FileText,
   PawPrint,
@@ -14,6 +16,7 @@ import {
   Send,
   Settings,
   UserPlus,
+  ClipboardList,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -51,9 +54,21 @@ const navMain = [
     items: [],
   },
   {
+    title: "Prontuário",
+    url: "/medical-records",
+    icon: ClipboardList,
+    items: [],
+  },
+  {
     title: "Agendamentos",
     url: "/appointments",
     icon: Calendar,
+    items: [],
+  },
+  {
+    title: "Lembretes",
+    url: "/reminders",
+    icon: BellRing,
     items: [],
   },
   {
@@ -72,6 +87,12 @@ const navMain = [
     title: "Financeiro",
     url: "/financial",
     icon: DollarSign,
+    items: [],
+  },
+  {
+    title: "Caixa",
+    url: "/cash-register",
+    icon: Wallet,
     items: [],
   },
   {

@@ -24,6 +24,9 @@ import SuperAdmin from "./pages/SuperAdmin";
 import Invite from "./pages/Invite";
 import NotFound from "./pages/NotFound";
 import Logs from "./pages/Logs";
+import MedicalRecords from "./pages/MedicalRecords";
+import Reminders from "./pages/Reminders";
+import CashRegister from "./pages/CashRegister";
 
 const queryClient = new QueryClient();
 
@@ -72,6 +75,9 @@ const App = () => (
             <Route path="/services" element={<Services />} />
             <Route path="/financial" element={<Financial />} />
             <Route path="/pets" element={<Pets />} />
+            <Route path="/medical-records" element={<MedicalRecords />} />
+            <Route path="/reminders" element={<Reminders />} />
+            <Route path="/cash-register" element={<CashRegister />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/invite" element={<Invite />} />

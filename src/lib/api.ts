@@ -75,7 +75,13 @@ export async function signUp(payload: SignUpPayload): Promise<{ token: string; u
       }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao criar conta.');
+    if (!res.ok) {
+      const error = new Error((data as { error?: string }).error ?? 'Erro ao criar conta.');
+      if (data && typeof data === 'object' && 'field' in data) {
+        (error as Error & { field?: string }).field = String((data as { field?: string }).field ?? '');
+      }
+      throw error;
+    }
     setToken(data.token);
     return { token: data.token, user: data.user };
   } catch (err) {
@@ -123,7 +129,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   return data.user ?? null;
 }
 
-export type MeResponse = { user: AuthUser; company: Company | null; is_admin: boolean };
+export type MeResponse = { user: AuthUser; company: Company | null; is_admin: boolean; is_superadmin?: boolean };
 
 export async function getMe(): Promise<MeResponse | null> {
   const token = getToken();
@@ -141,6 +147,7 @@ export async function getMe(): Promise<MeResponse | null> {
     user: data.user,
     company: data.company ?? null,
     is_admin: !!data.is_admin,
+    is_superadmin: !!data.is_superadmin,
   };
 }
 
@@ -310,6 +317,92 @@ export async function deleteAppointment(id: string): Promise<void> {
   await apiRequest<void>(`/api/appointments/${id}`, 'DELETE');
 }
 
+export type MedicalRecord = {
+  id: string;
+  pet_id: string;
+  appointment_id: string | null;
+  record_date: string;
+  weight_kg: number | null;
+  temperature_c: number | null;
+  diagnosis: string;
+  treatment: string;
+  notes: string;
+  created_at: string;
+  pet_name: string;
+  client_name: string;
+};
+
+export type MedicalRecordPayload = {
+  pet_id: string;
+  appointment_id?: string;
+  record_date: string;
+  weight_kg?: number;
+  temperature_c?: number;
+  diagnosis?: string;
+  treatment?: string;
+  notes?: string;
+};
+
+export async function getMedicalRecords(params?: { pet_id?: string; q?: string; page?: number; limit?: number }): Promise<MedicalRecord[]> {
+  const query = new URLSearchParams();
+  if (params?.pet_id) query.set('pet_id', params.pet_id);
+  if (params?.q) query.set('q', params.q);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiGet<MedicalRecord[]>(`/api/medical-records${suffix}`);
+}
+
+export async function createMedicalRecord(payload: MedicalRecordPayload): Promise<MedicalRecord> {
+  return apiRequest<MedicalRecord>('/api/medical-records', 'POST', payload);
+}
+
+export async function updateMedicalRecord(id: string, payload: MedicalRecordPayload): Promise<MedicalRecord> {
+  return apiRequest<MedicalRecord>(`/api/medical-records/${id}`, 'PUT', payload);
+}
+
+export async function deleteMedicalRecord(id: string): Promise<void> {
+  await apiRequest<void>(`/api/medical-records/${id}`, 'DELETE');
+}
+
+export type ReminderJob = {
+  id: string;
+  appointment_id: string | null;
+  reminder_type: string;
+  channel: string;
+  status: 'pending' | 'sent' | 'failed' | 'cancelled';
+  scheduled_for: string;
+  sent_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  pet_name: string;
+  client_name: string;
+  appointment_at: string | null;
+};
+
+export async function getReminders(params?: { status?: string; q?: string; page?: number; limit?: number }): Promise<ReminderJob[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set('status', params.status);
+  if (params?.q) query.set('q', params.q);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiGet<ReminderJob[]>(`/api/reminders${suffix}`);
+}
+
+export type ProcessDueRemindersResult = {
+  processed: number;
+  reminders: Array<{ id: string; reminder_type: string; channel: string; scheduled_for: string; sent_at: string }>;
+};
+
+export async function processDueReminders(limit = 50): Promise<ProcessDueRemindersResult> {
+  return apiRequest<ProcessDueRemindersResult>('/api/reminders/process-due', 'POST', { limit });
+}
+
+export async function cancelReminder(id: string): Promise<void> {
+  await apiRequest<void>(`/api/reminders/${id}/cancel`, 'PUT');
+}
+
 export type TransactionRevenue = { id: string; date: string; description: string; type: string; value: number; status: string };
 export type TransactionExpense = { id: string; date: string; description: string; category: string; value: number };
 export type TransactionsData = { revenues: TransactionRevenue[]; expenses: TransactionExpense[]; stats: { label: string; value: string; icon: string }[] };
@@ -326,6 +419,95 @@ export async function updateTransaction(id: string, payload: TransactionPayload)
 }
 export async function deleteTransaction(id: string): Promise<void> {
   await apiRequest<void>(`/api/transactions/${id}`, 'DELETE');
+}
+
+export type CashbookStats = {
+  total_inflow: number;
+  total_outflow: number;
+  balance: number;
+  inflow_month: number;
+  outflow_month: number;
+};
+
+export type CashbookEntry = {
+  id: string;
+  transaction_id: string | null;
+  entry_type: 'inflow' | 'outflow';
+  amount: number;
+  payment_method: string;
+  description: string;
+  occurred_at: string;
+  reference_type: string | null;
+  reference_id: string | null;
+  transaction_status: string | null;
+};
+
+export type CashbookData = {
+  stats: CashbookStats;
+  entries: CashbookEntry[];
+};
+
+export async function getCashbook(params?: { entry_type?: 'inflow' | 'outflow'; q?: string; page?: number; limit?: number }): Promise<CashbookData> {
+  const query = new URLSearchParams();
+  if (params?.entry_type) query.set('entry_type', params.entry_type);
+  if (params?.q) query.set('q', params.q);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiGet<CashbookData>(`/api/cashbook${suffix}`);
+}
+
+export type CashEntryPayload = {
+  entry_type: 'inflow' | 'outflow';
+  amount: number;
+  description: string;
+  payment_method?: 'cash' | 'pix' | 'credit_card' | 'debit_card' | 'bank_transfer' | 'other';
+  occurred_at?: string;
+};
+
+export async function createCashEntry(payload: CashEntryPayload): Promise<CashbookEntry> {
+  return apiRequest<CashbookEntry>('/api/cashbook/entries', 'POST', payload);
+}
+
+export type PendingAppointmentPayment = {
+  id: string;
+  scheduled_at: string;
+  status: string;
+  client_name: string;
+  pet_name: string;
+  service_name: string;
+  service_price: number;
+  paid_total: number;
+  remaining: number;
+};
+
+export async function getPendingAppointmentPayments(): Promise<PendingAppointmentPayment[]> {
+  return apiGet<PendingAppointmentPayment[]>('/api/cashbook/pending-appointments');
+}
+
+export type AppointmentPaymentPayload = {
+  amount?: number;
+  payment_method?: 'cash' | 'pix' | 'credit_card' | 'debit_card' | 'bank_transfer' | 'other';
+  paid_at?: string;
+  description?: string;
+};
+
+export type AppointmentPaymentResult = {
+  appointment_id: string;
+  transaction_id: string;
+  amount: number;
+  payment_method: string;
+  paid_total: number;
+  remaining: number;
+  payment_status: 'partial' | 'paid';
+  service_price: number;
+  client_name: string;
+  pet_name: string;
+  service_name: string;
+};
+
+export async function payAppointment(id: string, payload: AppointmentPaymentPayload): Promise<AppointmentPaymentResult> {
+  return apiRequest<AppointmentPaymentResult>(`/api/cashbook/appointments/${id}/pay`, 'POST', payload);
 }
 
 export type CompanyListItem = { id: string; name: string; plan: string; plan_id?: string | null; users: number; status: string; mrr: number; created: string };
@@ -433,4 +615,29 @@ export async function exportCompanies(): Promise<Blob> {
   const res = await fetch(`${API_URL}/api/admin/export/companies`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.blob();
+}
+
+export type AdminMetrics = {
+  stats: {
+    total_companies: number;
+    active_companies: number;
+    trial_companies: number;
+    past_due_companies: number;
+    cancelled_companies: number;
+    new_companies_30d: number;
+    total_users: number;
+    mrr: number;
+    arpu: number;
+    revenue_month: number;
+    revenue_change_pct: number;
+  };
+  charts: {
+    companies_by_status: { status: string; count: number }[];
+    companies_by_month: { month: string; value: number }[];
+    revenue_by_month: { month: string; value: number }[];
+  };
+};
+
+export async function getAdminMetrics(): Promise<AdminMetrics> {
+  return apiGet<AdminMetrics>('/api/admin/metrics');
 }
