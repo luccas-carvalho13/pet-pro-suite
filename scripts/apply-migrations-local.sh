@@ -23,6 +23,7 @@ run_sql < db/migrations/003_entities.sql
 run_sql < db/migrations/004_auth_encrypted_password.sql
 run_sql < db/migrations/005_settings.sql
 run_sql < db/migrations/006_user_security.sql
+run_sql < db/migrations/007_audit_logs.sql
 run_sql < scripts/local/02_disable_rls_local.sql
 run_sql < db/seed.sql
 
