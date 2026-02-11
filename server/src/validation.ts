@@ -12,11 +12,11 @@ export const loginSchema = z.object({
 export const registerSchema = z.object({
   email: emailSchema,
   password: z.string().min(6, 'A senha deve ter no mínimo 6 caracteres.'),
-  full_name: z.string().trim().optional(),
-  user_phone: z.string().trim().optional(),
+  full_name: nonEmpty('Nome completo'),
+  user_phone: nonEmpty('Telefone do responsável'),
   company_name: nonEmpty('Nome da empresa'),
   company_cnpj: z.string().trim().optional(),
-  company_phone: z.string().trim().optional(),
+  company_phone: nonEmpty('Telefone da empresa'),
   company_address: z.string().trim().optional(),
 });
 
@@ -87,6 +87,38 @@ export const transactionPayloadSchema = z.object({
   category: z.string().trim().optional(),
   value: z.number().nonnegative('Valor inválido.'),
   status: z.string().trim().optional(),
+});
+
+const paymentMethodSchema = z.enum(['cash', 'pix', 'credit_card', 'debit_card', 'bank_transfer', 'other']);
+
+export const medicalRecordPayloadSchema = z.object({
+  pet_id: nonEmpty('Pet'),
+  appointment_id: z.string().trim().optional(),
+  record_date: z.string().date('Data do registro inválida.'),
+  weight_kg: z.number().nonnegative('Peso inválido.').max(200, 'Peso inválido.').optional(),
+  temperature_c: z.number().min(30, 'Temperatura inválida.').max(45, 'Temperatura inválida.').optional(),
+  diagnosis: z.string().trim().optional(),
+  treatment: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+});
+
+export const reminderProcessPayloadSchema = z.object({
+  limit: z.number().int().min(1, 'Limite inválido.').max(200, 'Limite inválido.').optional(),
+});
+
+export const cashEntryPayloadSchema = z.object({
+  entry_type: z.enum(['inflow', 'outflow']),
+  amount: z.number().positive('Valor inválido.'),
+  description: nonEmpty('Descrição'),
+  payment_method: paymentMethodSchema.optional(),
+  occurred_at: z.string().datetime('Data/hora inválida.').optional(),
+});
+
+export const appointmentPaymentPayloadSchema = z.object({
+  amount: z.number().positive('Valor inválido.').optional(),
+  payment_method: paymentMethodSchema.optional(),
+  paid_at: z.string().datetime('Data/hora inválida.').optional(),
+  description: z.string().trim().optional(),
 });
 
 export const companySettingsSchema = z.object({

@@ -8,19 +8,24 @@ import { Response } from 'express';
 import { pool } from '../db.js';
 import type { AuthReq } from '../middleware.js';
 import { parseWithSchema, sendError } from '../http-error.js';
+import { assertPlanLimit, assertPlanModuleAccess } from '../plan-access.js';
 import {
+  appointmentPaymentPayloadSchema,
   appointmentPayloadSchema,
   appearanceSettingsSchema,
+  cashEntryPayloadSchema,
   clientPayloadSchema,
   companyPayloadSchema,
   companySettingsSchema,
   companyUserRoleSchema,
+  reminderProcessPayloadSchema,
   notificationSettingsSchema,
   planPayloadSchema,
   productPayloadSchema,
   securitySettingsSchema,
   servicePayloadSchema,
   transactionPayloadSchema,
+  medicalRecordPayloadSchema,
   petPayloadSchema,
 } from '../validation.js';
 import { writeAuditLog } from '../audit.js';
@@ -41,6 +46,108 @@ function listParams(req: AuthReq) {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const order = req.query.order === 'asc' ? 'ASC' : 'DESC';
   return { page, limit, offset, q, order };
+}
+
+const REMINDER_LEAD_MS = 24 * 60 * 60 * 1000;
+const REMINDER_MIN_DELAY_MS = 60 * 1000;
+
+function resolveReminderDate(scheduledAt: string): Date {
+  const base = new Date(scheduledAt);
+  if (Number.isNaN(base.getTime())) return new Date(Date.now() + REMINDER_MIN_DELAY_MS);
+  const reminderAt = new Date(base.getTime() - REMINDER_LEAD_MS);
+  const minAllowed = new Date(Date.now() + REMINDER_MIN_DELAY_MS);
+  return reminderAt > minAllowed ? reminderAt : minAllowed;
+}
+
+async function remindersEnabled(companyIdVal: string): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT reminders FROM public.notification_settings WHERE company_id = $1`,
+    [companyIdVal]
+  );
+  if (!rows[0]) return true;
+  return rows[0].reminders !== false;
+}
+
+async function cancelAppointmentReminders(companyIdVal: string, appointmentId: string, reason?: string) {
+  await pool.query(
+    `UPDATE public.reminder_jobs
+     SET status = 'cancelled',
+         error_message = COALESCE($3, error_message)
+     WHERE company_id = $1
+       AND appointment_id = $2
+       AND status = 'pending'`,
+    [companyIdVal, appointmentId, reason ?? null]
+  );
+}
+
+async function syncAppointmentReminder(input: {
+  companyId: string;
+  appointmentId: string;
+  clientId: string;
+  petId: string;
+  scheduledAt: string;
+  status: string;
+}) {
+  try {
+    const enabled = await remindersEnabled(input.companyId);
+    const inactiveStatus = input.status === 'cancelled' || input.status === 'completed';
+    if (!enabled || inactiveStatus) {
+      await cancelAppointmentReminders(input.companyId, input.appointmentId, enabled ? 'Agendamento encerrado.' : 'Lembretes desativados.');
+      return;
+    }
+
+    const scheduledFor = resolveReminderDate(input.scheduledAt);
+    const payload = {
+      appointment_id: input.appointmentId,
+      client_id: input.clientId,
+      pet_id: input.petId,
+      scheduled_at: input.scheduledAt,
+      template: 'appointment_reminder_v1',
+    };
+
+    const { rows } = await pool.query(
+      `WITH latest AS (
+         SELECT id
+         FROM public.reminder_jobs
+         WHERE company_id = $1
+           AND appointment_id = $2
+           AND reminder_type = 'appointment'
+         ORDER BY created_at DESC
+         LIMIT 1
+       )
+       UPDATE public.reminder_jobs r
+       SET client_id = $3,
+           pet_id = $4,
+           scheduled_for = $5,
+           channel = 'whatsapp',
+           status = 'pending',
+           sent_at = NULL,
+           error_message = NULL,
+           payload = $6::jsonb
+       FROM latest
+       WHERE r.id = latest.id
+       RETURNING r.id`,
+      [input.companyId, input.appointmentId, input.clientId, input.petId, scheduledFor.toISOString(), JSON.stringify(payload)]
+    );
+
+    if (rows.length === 0) {
+      await pool.query(
+        `INSERT INTO public.reminder_jobs
+          (company_id, appointment_id, client_id, pet_id, reminder_type, channel, scheduled_for, status, payload)
+         VALUES ($1, $2, $3, $4, 'appointment', 'whatsapp', $5, 'pending', $6::jsonb)`,
+        [input.companyId, input.appointmentId, input.clientId, input.petId, scheduledFor.toISOString(), JSON.stringify(payload)]
+      );
+    }
+  } catch (e) {
+    // Reminder nunca deve bloquear fluxo de agendamento.
+    console.warn('syncAppointmentReminder:', e);
+  }
+}
+
+function toDateOnly(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+  return d.toISOString().slice(0, 10);
 }
 
 export async function dashboardStats(req: AuthReq, res: Response) {
@@ -205,6 +312,8 @@ export async function getProducts(req: AuthReq, res: Response) {
   try {
     const cid = companyId(req);
     if (!cid) return res.json([]);
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'inventory', 'Gestão de estoque');
+    if (!moduleOk) return;
     const { limit, offset, q, order } = listParams(req);
     const { rows } = await pool.query(
       `SELECT id, name, category, stock, min_stock, price
@@ -337,6 +446,8 @@ export async function getTransactions(req: AuthReq, res: Response) {
   try {
     const cid = companyId(req);
     if (!cid) return res.json({ revenues: [], expenses: [], stats: [] });
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'financial', 'Financeiro');
+    if (!moduleOk) return;
     const type = (req.query.type as string) || 'all';
     const { limit, offset, q } = listParams(req);
 
@@ -650,6 +761,8 @@ export async function exportReport(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'reports', 'Relatórios');
+    if (!moduleOk) return;
     const type = (req.query.type as string) || 'clients';
     let csv = '';
     let filename = `${type}.csv`;
@@ -942,7 +1055,7 @@ function ensureCompanyId(req: AuthReq, res: Response): string | null {
 }
 
 async function ensureCompanyRow(
-  table: 'clients' | 'pets' | 'services' | 'products' | 'appointments' | 'transactions',
+  table: 'clients' | 'pets' | 'services' | 'products' | 'appointments' | 'transactions' | 'medical_records',
   id: string,
   companyIdVal: string
 ) {
@@ -1041,6 +1154,8 @@ export async function createPet(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
+    const petsLimitOk = await assertPlanLimit(res, cid, { entity: 'pets', entityLabel: 'pets', table: 'pets' });
+    if (!petsLimitOk) return;
     const parsed = parseWithSchema(res, petPayloadSchema, req.body);
     if (!parsed) return;
     const { client_id, name, species, breed, birth_date } = parsed;
@@ -1207,6 +1322,8 @@ export async function createProduct(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'inventory', 'Gestão de estoque');
+    if (!moduleOk) return;
     const parsed = parseWithSchema(res, productPayloadSchema, req.body);
     if (!parsed) return;
     const { name, category, stock, min_stock, price, unit } = parsed;
@@ -1239,6 +1356,8 @@ export async function updateProduct(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'inventory', 'Gestão de estoque');
+    if (!moduleOk) return;
     const id = req.params.id;
     const parsed = parseWithSchema(res, productPayloadSchema, req.body);
     if (!parsed) return;
@@ -1274,6 +1393,8 @@ export async function deleteProduct(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'inventory', 'Gestão de estoque');
+    if (!moduleOk) return;
     const id = req.params.id;
     const { rowCount } = await pool.query(
       `DELETE FROM public.products WHERE id = $1 AND company_id = $2`,
@@ -1323,6 +1444,14 @@ export async function createAppointment(req: AuthReq, res: Response) {
     );
     const meta = joined.rows[0];
     const a = rows[0];
+    await syncAppointmentReminder({
+      companyId: cid,
+      appointmentId: a.id,
+      clientId: client_id,
+      petId: pet_id,
+      scheduledAt: a.scheduled_at,
+      status: a.status,
+    });
     res.status(201).json({
       id: a.id,
       client_id,
@@ -1383,6 +1512,14 @@ export async function updateAppointment(req: AuthReq, res: Response) {
     );
     const meta = joined.rows[0];
     const a = rows[0];
+    await syncAppointmentReminder({
+      companyId: cid,
+      appointmentId: a.id,
+      clientId: client_id,
+      petId: pet_id,
+      scheduledAt: a.scheduled_at,
+      status: a.status,
+    });
     res.json({
       id: a.id,
       client_id,
@@ -1414,6 +1551,11 @@ export async function deleteAppointment(req: AuthReq, res: Response) {
       [id, cid]
     );
     if (!rowCount) return sendError(res, 404, 'NOT_FOUND', 'Agendamento não encontrado.');
+    try {
+      await cancelAppointmentReminders(cid, id, 'Agendamento removido.');
+    } catch (e) {
+      console.warn('cancelAppointmentReminders:', e);
+    }
     res.json({ ok: true });
   } catch (e) {
     console.error('deleteAppointment:', e);
@@ -1421,10 +1563,364 @@ export async function deleteAppointment(req: AuthReq, res: Response) {
   }
 }
 
+export async function getReminders(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'reminders', 'Lembretes');
+    if (!moduleOk) return;
+    const { limit, offset, q, order } = listParams(req);
+    const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+
+    const { rows } = await pool.query(
+      `SELECT
+         r.id,
+         r.appointment_id,
+         r.reminder_type,
+         r.channel,
+         r.status,
+         r.scheduled_for,
+         r.sent_at,
+         r.error_message,
+         r.created_at,
+         p.name AS pet_name,
+         c.name AS client_name,
+         a.scheduled_at AS appointment_at
+       FROM public.reminder_jobs r
+       LEFT JOIN public.pets p ON p.id = r.pet_id
+       LEFT JOIN public.clients c ON c.id = r.client_id
+       LEFT JOIN public.appointments a ON a.id = r.appointment_id
+       WHERE r.company_id = $1
+         AND ($2 = '' OR r.status = $2)
+         AND (
+           $3 = '' OR
+           COALESCE(p.name, '') ILIKE '%' || $3 || '%' OR
+           COALESCE(c.name, '') ILIKE '%' || $3 || '%' OR
+           COALESCE(r.reminder_type, '') ILIKE '%' || $3 || '%'
+         )
+       ORDER BY r.scheduled_for ${order}
+       LIMIT $4 OFFSET $5`,
+      [cid, status, q, limit, offset]
+    );
+
+    res.json(
+      rows.map((r: Record<string, unknown>) => ({
+        id: r.id,
+        appointment_id: r.appointment_id,
+        reminder_type: r.reminder_type,
+        channel: r.channel,
+        status: r.status,
+        scheduled_for: r.scheduled_for,
+        sent_at: r.sent_at,
+        error_message: r.error_message,
+        created_at: r.created_at,
+        pet_name: r.pet_name ?? '',
+        client_name: r.client_name ?? '',
+        appointment_at: r.appointment_at,
+      }))
+    );
+  } catch (e) {
+    console.error('getReminders:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao listar lembretes.');
+  }
+}
+
+export async function processDueReminders(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'reminders', 'Lembretes');
+    if (!moduleOk) return;
+
+    const parsed = parseWithSchema(res, reminderProcessPayloadSchema, req.body ?? {});
+    if (!parsed) return;
+    const limit = parsed.limit ?? 50;
+
+    const { rows } = await pool.query(
+      `WITH due AS (
+         SELECT id
+         FROM public.reminder_jobs
+         WHERE company_id = $1
+           AND status = 'pending'
+           AND scheduled_for <= now()
+         ORDER BY scheduled_for ASC
+         LIMIT $2
+       )
+       UPDATE public.reminder_jobs r
+       SET status = 'sent',
+           sent_at = now(),
+           error_message = NULL
+       FROM due
+       WHERE r.id = due.id
+       RETURNING r.id, r.reminder_type, r.channel, r.scheduled_for, r.sent_at`,
+      [cid, limit]
+    );
+
+    res.json({
+      processed: rows.length,
+      reminders: rows,
+    });
+  } catch (e) {
+    console.error('processDueReminders:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao processar lembretes.');
+  }
+}
+
+export async function cancelReminder(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'reminders', 'Lembretes');
+    if (!moduleOk) return;
+    const id = req.params.id;
+
+    const { rows } = await pool.query(
+      `UPDATE public.reminder_jobs
+       SET status = 'cancelled',
+           error_message = COALESCE(error_message, 'Cancelado manualmente.')
+       WHERE id = $1
+         AND company_id = $2
+         AND status = 'pending'
+       RETURNING id`,
+      [id, cid]
+    );
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Lembrete não encontrado ou já processado.');
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('cancelReminder:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao cancelar lembrete.');
+  }
+}
+
+export async function getMedicalRecords(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'medical_records', 'Prontuário clínico');
+    if (!moduleOk) return;
+
+    const { limit, offset, q, order } = listParams(req);
+    const petId = typeof req.query.pet_id === 'string' ? req.query.pet_id.trim() : '';
+
+    const { rows } = await pool.query(
+      `SELECT
+         mr.id,
+         mr.pet_id,
+         mr.appointment_id,
+         mr.record_date,
+         mr.weight_kg,
+         mr.temperature_c,
+         mr.diagnosis,
+         mr.treatment,
+         mr.notes,
+         mr.created_at,
+         p.name AS pet_name,
+         c.name AS client_name
+       FROM public.medical_records mr
+       JOIN public.pets p ON p.id = mr.pet_id
+       JOIN public.clients c ON c.id = p.client_id
+       WHERE mr.company_id = $1
+         AND ($2 = '' OR mr.pet_id = $2)
+         AND (
+           $3 = '' OR
+           p.name ILIKE '%' || $3 || '%' OR
+           c.name ILIKE '%' || $3 || '%' OR
+           COALESCE(mr.diagnosis, '') ILIKE '%' || $3 || '%'
+         )
+       ORDER BY mr.record_date ${order}, mr.created_at ${order}
+       LIMIT $4 OFFSET $5`,
+      [cid, petId, q, limit, offset]
+    );
+
+    res.json(
+      rows.map((r: Record<string, unknown>) => ({
+        id: r.id,
+        pet_id: r.pet_id,
+        appointment_id: r.appointment_id,
+        record_date: r.record_date,
+        weight_kg: r.weight_kg != null ? Number(r.weight_kg) : null,
+        temperature_c: r.temperature_c != null ? Number(r.temperature_c) : null,
+        diagnosis: r.diagnosis ?? '',
+        treatment: r.treatment ?? '',
+        notes: r.notes ?? '',
+        created_at: r.created_at,
+        pet_name: r.pet_name,
+        client_name: r.client_name,
+      }))
+    );
+  } catch (e) {
+    console.error('getMedicalRecords:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao listar prontuários.');
+  }
+}
+
+export async function createMedicalRecord(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'medical_records', 'Prontuário clínico');
+    if (!moduleOk) return;
+
+    const parsed = parseWithSchema(res, medicalRecordPayloadSchema, req.body);
+    if (!parsed) return;
+    const { pet_id, appointment_id, record_date, weight_kg, temperature_c, diagnosis, treatment, notes } = parsed;
+
+    const petOk = await ensureCompanyRow('pets', pet_id, cid);
+    if (!petOk) return sendError(res, 400, 'VALIDATION_ERROR', 'Pet inválido.', 'pet_id');
+    if (appointment_id) {
+      const aptOk = await ensureCompanyRow('appointments', appointment_id, cid);
+      if (!aptOk) return sendError(res, 400, 'VALIDATION_ERROR', 'Agendamento inválido.', 'appointment_id');
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO public.medical_records
+        (company_id, pet_id, appointment_id, record_date, weight_kg, temperature_c, diagnosis, treatment, notes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, pet_id, appointment_id, record_date, weight_kg, temperature_c, diagnosis, treatment, notes, created_at`,
+      [
+        cid,
+        pet_id,
+        toNull(appointment_id),
+        record_date,
+        weight_kg ?? null,
+        temperature_c ?? null,
+        toNull(diagnosis),
+        toNull(treatment),
+        toNull(notes),
+        req.userId ?? null,
+      ]
+    );
+    const row = rows[0];
+
+    const petMeta = await pool.query(
+      `SELECT p.name AS pet_name, c.name AS client_name
+       FROM public.pets p
+       JOIN public.clients c ON c.id = p.client_id
+       WHERE p.id = $1`,
+      [pet_id]
+    );
+
+    res.status(201).json({
+      id: row.id,
+      pet_id: row.pet_id,
+      appointment_id: row.appointment_id,
+      record_date: row.record_date,
+      weight_kg: row.weight_kg != null ? Number(row.weight_kg) : null,
+      temperature_c: row.temperature_c != null ? Number(row.temperature_c) : null,
+      diagnosis: row.diagnosis ?? '',
+      treatment: row.treatment ?? '',
+      notes: row.notes ?? '',
+      created_at: row.created_at,
+      pet_name: petMeta.rows[0]?.pet_name ?? '',
+      client_name: petMeta.rows[0]?.client_name ?? '',
+    });
+  } catch (e) {
+    console.error('createMedicalRecord:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar prontuário.');
+  }
+}
+
+export async function updateMedicalRecord(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'medical_records', 'Prontuário clínico');
+    if (!moduleOk) return;
+
+    const id = req.params.id;
+    const parsed = parseWithSchema(res, medicalRecordPayloadSchema, req.body);
+    if (!parsed) return;
+    const { pet_id, appointment_id, record_date, weight_kg, temperature_c, diagnosis, treatment, notes } = parsed;
+
+    const petOk = await ensureCompanyRow('pets', pet_id, cid);
+    if (!petOk) return sendError(res, 400, 'VALIDATION_ERROR', 'Pet inválido.', 'pet_id');
+    if (appointment_id) {
+      const aptOk = await ensureCompanyRow('appointments', appointment_id, cid);
+      if (!aptOk) return sendError(res, 400, 'VALIDATION_ERROR', 'Agendamento inválido.', 'appointment_id');
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE public.medical_records
+       SET pet_id = $1,
+           appointment_id = $2,
+           record_date = $3,
+           weight_kg = $4,
+           temperature_c = $5,
+           diagnosis = $6,
+           treatment = $7,
+           notes = $8
+       WHERE id = $9 AND company_id = $10
+       RETURNING id, pet_id, appointment_id, record_date, weight_kg, temperature_c, diagnosis, treatment, notes, created_at`,
+      [
+        pet_id,
+        toNull(appointment_id),
+        record_date,
+        weight_kg ?? null,
+        temperature_c ?? null,
+        toNull(diagnosis),
+        toNull(treatment),
+        toNull(notes),
+        id,
+        cid,
+      ]
+    );
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Prontuário não encontrado.');
+    const row = rows[0];
+
+    const petMeta = await pool.query(
+      `SELECT p.name AS pet_name, c.name AS client_name
+       FROM public.pets p
+       JOIN public.clients c ON c.id = p.client_id
+       WHERE p.id = $1`,
+      [pet_id]
+    );
+
+    res.json({
+      id: row.id,
+      pet_id: row.pet_id,
+      appointment_id: row.appointment_id,
+      record_date: row.record_date,
+      weight_kg: row.weight_kg != null ? Number(row.weight_kg) : null,
+      temperature_c: row.temperature_c != null ? Number(row.temperature_c) : null,
+      diagnosis: row.diagnosis ?? '',
+      treatment: row.treatment ?? '',
+      notes: row.notes ?? '',
+      created_at: row.created_at,
+      pet_name: petMeta.rows[0]?.pet_name ?? '',
+      client_name: petMeta.rows[0]?.client_name ?? '',
+    });
+  } catch (e) {
+    console.error('updateMedicalRecord:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar prontuário.');
+  }
+}
+
+export async function deleteMedicalRecord(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'medical_records', 'Prontuário clínico');
+    if (!moduleOk) return;
+    const id = req.params.id;
+
+    const { rowCount } = await pool.query(
+      `DELETE FROM public.medical_records WHERE id = $1 AND company_id = $2`,
+      [id, cid]
+    );
+    if (!rowCount) return sendError(res, 404, 'NOT_FOUND', 'Prontuário não encontrado.');
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('deleteMedicalRecord:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover prontuário.');
+  }
+}
+
 export async function createTransaction(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'financial', 'Financeiro');
+    if (!moduleOk) return;
     const parsed = parseWithSchema(res, transactionPayloadSchema, req.body);
     if (!parsed) return;
     const { type, date, description, category, value, status } = parsed;
@@ -1462,6 +1958,8 @@ export async function updateTransaction(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'financial', 'Financeiro');
+    if (!moduleOk) return;
     const id = req.params.id;
     const parsed = parseWithSchema(res, transactionPayloadSchema, req.body);
     if (!parsed) return;
@@ -1502,6 +2000,8 @@ export async function deleteTransaction(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'financial', 'Financeiro');
+    if (!moduleOk) return;
     const id = req.params.id;
     const { rowCount } = await pool.query(
       `DELETE FROM public.transactions WHERE id = $1 AND company_id = $2`,
@@ -1512,5 +2012,342 @@ export async function deleteTransaction(req: AuthReq, res: Response) {
   } catch (e) {
     console.error('deleteTransaction:', e);
     sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover transação.');
+  }
+}
+
+export async function getCashbook(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'financial', 'Financeiro');
+    if (!moduleOk) return;
+    const { limit, offset, q, order } = listParams(req);
+    const entryType = typeof req.query.entry_type === 'string' ? req.query.entry_type.trim() : '';
+
+    const [entriesRes, statsRes] = await Promise.all([
+      pool.query(
+        `SELECT
+           ce.id,
+           ce.transaction_id,
+           ce.entry_type,
+           ce.amount,
+           ce.payment_method,
+           ce.description,
+           ce.occurred_at,
+           ce.reference_type,
+           ce.reference_id,
+           t.status AS transaction_status
+         FROM public.cash_entries ce
+         LEFT JOIN public.transactions t ON t.id = ce.transaction_id
+         WHERE ce.company_id = $1
+           AND ($2 = '' OR ce.entry_type = $2)
+           AND (
+             $3 = '' OR
+             ce.description ILIKE '%' || $3 || '%' OR
+             COALESCE(ce.payment_method, '') ILIKE '%' || $3 || '%'
+           )
+         ORDER BY ce.occurred_at ${order}
+         LIMIT $4 OFFSET $5`,
+        [cid, entryType, q, limit, offset]
+      ),
+      pool.query(
+        `SELECT
+           COALESCE(SUM(CASE WHEN entry_type = 'inflow' THEN amount ELSE 0 END), 0)::float AS total_inflow,
+           COALESCE(SUM(CASE WHEN entry_type = 'outflow' THEN amount ELSE 0 END), 0)::float AS total_outflow,
+           COALESCE(SUM(CASE WHEN entry_type = 'inflow' THEN amount ELSE -amount END), 0)::float AS balance,
+           COALESCE(SUM(CASE WHEN entry_type = 'inflow' AND occurred_at >= date_trunc('month', now()) THEN amount ELSE 0 END), 0)::float AS inflow_month,
+           COALESCE(SUM(CASE WHEN entry_type = 'outflow' AND occurred_at >= date_trunc('month', now()) THEN amount ELSE 0 END), 0)::float AS outflow_month
+         FROM public.cash_entries
+         WHERE company_id = $1`,
+        [cid]
+      ),
+    ]);
+
+    const stats = statsRes.rows[0] ?? {};
+    res.json({
+      stats: {
+        total_inflow: Number(stats.total_inflow ?? 0),
+        total_outflow: Number(stats.total_outflow ?? 0),
+        balance: Number(stats.balance ?? 0),
+        inflow_month: Number(stats.inflow_month ?? 0),
+        outflow_month: Number(stats.outflow_month ?? 0),
+      },
+      entries: entriesRes.rows.map((r: Record<string, unknown>) => ({
+        id: r.id,
+        transaction_id: r.transaction_id,
+        entry_type: r.entry_type,
+        amount: Number(r.amount ?? 0),
+        payment_method: r.payment_method ?? 'other',
+        description: r.description ?? '',
+        occurred_at: r.occurred_at,
+        reference_type: r.reference_type,
+        reference_id: r.reference_id,
+        transaction_status: r.transaction_status ?? null,
+      })),
+    });
+  } catch (e) {
+    console.error('getCashbook:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao carregar caixa.');
+  }
+}
+
+export async function createCashEntry(req: AuthReq, res: Response) {
+  const cid = ensureCompanyId(req, res);
+  if (!cid) return;
+  const moduleOk = await assertPlanModuleAccess(res, cid, 'financial', 'Financeiro');
+  if (!moduleOk) return;
+  const parsed = parseWithSchema(res, cashEntryPayloadSchema, req.body);
+  if (!parsed) return;
+
+  const { entry_type, amount, description, payment_method, occurred_at } = parsed;
+  const occurredAt = occurred_at ? new Date(occurred_at) : new Date();
+  if (Number.isNaN(occurredAt.getTime())) {
+    return sendError(res, 400, 'VALIDATION_ERROR', 'Data/hora inválida.', 'occurred_at');
+  }
+
+  const transactionType = entry_type === 'inflow' ? 'revenue' : 'expense';
+  const status = entry_type === 'inflow' ? 'paid' : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const transactionRes = await client.query(
+      `INSERT INTO public.transactions
+        (company_id, type, date, description, category, value, status, payment_method, paid_at, reference_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'cash_entry')
+       RETURNING id`,
+      [
+        cid,
+        transactionType,
+        toDateOnly(occurredAt.toISOString()),
+        description.trim(),
+        entry_type === 'inflow' ? 'Caixa' : 'Despesa',
+        Number(amount),
+        status,
+        payment_method ?? 'other',
+        entry_type === 'inflow' ? occurredAt.toISOString() : null,
+      ]
+    );
+    const transactionId = transactionRes.rows[0]?.id;
+
+    const cashEntryRes = await client.query(
+      `INSERT INTO public.cash_entries
+        (company_id, transaction_id, entry_type, amount, payment_method, description, occurred_at, created_by, reference_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
+       RETURNING id, transaction_id, entry_type, amount, payment_method, description, occurred_at`,
+      [
+        cid,
+        transactionId ?? null,
+        entry_type,
+        Number(amount),
+        payment_method ?? 'other',
+        description.trim(),
+        occurredAt.toISOString(),
+        req.userId ?? null,
+      ]
+    );
+    await client.query('COMMIT');
+    const row = cashEntryRes.rows[0];
+    res.status(201).json({
+      id: row.id,
+      transaction_id: row.transaction_id,
+      entry_type: row.entry_type,
+      amount: Number(row.amount),
+      payment_method: row.payment_method,
+      description: row.description,
+      occurred_at: row.occurred_at,
+    });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('createCashEntry:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar lançamento de caixa.');
+  } finally {
+    client.release();
+  }
+}
+
+export async function getPendingAppointmentPayments(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const moduleOk = await assertPlanModuleAccess(res, cid, 'financial', 'Financeiro');
+    if (!moduleOk) return;
+    const { limit, offset, q, order } = listParams(req);
+
+    const { rows } = await pool.query(
+      `SELECT
+         a.id,
+         a.scheduled_at,
+         a.status,
+         c.name AS client_name,
+         p.name AS pet_name,
+         s.name AS service_name,
+         s.price::float AS service_price,
+         COALESCE(SUM(CASE WHEN t.type = 'revenue' AND t.status = 'paid' THEN t.value ELSE 0 END), 0)::float AS paid_total
+       FROM public.appointments a
+       JOIN public.clients c ON c.id = a.client_id
+       JOIN public.pets p ON p.id = a.pet_id
+       JOIN public.services s ON s.id = a.service_id
+       LEFT JOIN public.transactions t
+         ON t.company_id = a.company_id
+        AND t.reference_type = 'appointment'
+        AND t.reference_id = a.id
+       WHERE a.company_id = $1
+         AND a.status <> 'cancelled'
+         AND (
+           $2 = '' OR
+           c.name ILIKE '%' || $2 || '%' OR
+           p.name ILIKE '%' || $2 || '%' OR
+           s.name ILIKE '%' || $2 || '%'
+         )
+       GROUP BY a.id, a.scheduled_at, a.status, c.name, p.name, s.name, s.price
+       HAVING COALESCE(SUM(CASE WHEN t.type = 'revenue' AND t.status = 'paid' THEN t.value ELSE 0 END), 0)::float < s.price::float
+       ORDER BY a.scheduled_at ${order}
+       LIMIT $3 OFFSET $4`,
+      [cid, q, limit, offset]
+    );
+
+    res.json(
+      rows.map((r: Record<string, unknown>) => {
+        const total = Number(r.service_price ?? 0);
+        const paid = Number(r.paid_total ?? 0);
+        return {
+          id: r.id,
+          scheduled_at: r.scheduled_at,
+          status: r.status,
+          client_name: r.client_name,
+          pet_name: r.pet_name,
+          service_name: r.service_name,
+          service_price: total,
+          paid_total: paid,
+          remaining: Number((total - paid).toFixed(2)),
+        };
+      })
+    );
+  } catch (e) {
+    console.error('getPendingAppointmentPayments:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao listar pagamentos pendentes.');
+  }
+}
+
+export async function payAppointment(req: AuthReq, res: Response) {
+  const cid = ensureCompanyId(req, res);
+  if (!cid) return;
+  const moduleOk = await assertPlanModuleAccess(res, cid, 'financial', 'Financeiro');
+  if (!moduleOk) return;
+  const appointmentId = req.params.id;
+
+  const parsed = parseWithSchema(res, appointmentPaymentPayloadSchema, req.body ?? {});
+  if (!parsed) return;
+  const { amount, payment_method, paid_at, description } = parsed;
+  const paidAt = paid_at ? new Date(paid_at) : new Date();
+  if (Number.isNaN(paidAt.getTime())) {
+    return sendError(res, 400, 'VALIDATION_ERROR', 'Data/hora inválida.', 'paid_at');
+  }
+
+  const appointmentRes = await pool.query(
+    `SELECT
+       a.id,
+       a.scheduled_at,
+       a.status,
+       c.name AS client_name,
+       p.name AS pet_name,
+       s.name AS service_name,
+       s.price::float AS service_price
+     FROM public.appointments a
+     JOIN public.clients c ON c.id = a.client_id
+     JOIN public.pets p ON p.id = a.pet_id
+     JOIN public.services s ON s.id = a.service_id
+     WHERE a.id = $1
+       AND a.company_id = $2
+     LIMIT 1`,
+    [appointmentId, cid]
+  );
+  const appointment = appointmentRes.rows[0];
+  if (!appointment) return sendError(res, 404, 'NOT_FOUND', 'Agendamento não encontrado.');
+  if (appointment.status === 'cancelled') {
+    return sendError(res, 400, 'VALIDATION_ERROR', 'Agendamento cancelado não pode ser pago.', 'status');
+  }
+
+  const paidTotalsRes = await pool.query(
+    `SELECT COALESCE(SUM(value), 0)::float AS total
+     FROM public.transactions
+     WHERE company_id = $1
+       AND reference_type = 'appointment'
+       AND reference_id = $2
+       AND type = 'revenue'
+       AND status = 'paid'`,
+    [cid, appointmentId]
+  );
+  const paidTotal = Number(paidTotalsRes.rows[0]?.total ?? 0);
+  const servicePrice = Number(appointment.service_price ?? 0);
+  const remaining = Number((servicePrice - paidTotal).toFixed(2));
+  if (remaining <= 0) return sendError(res, 409, 'CONFLICT', 'Agendamento já está quitado.');
+
+  const amountToPay = Number((amount ?? remaining).toFixed(2));
+  if (amountToPay <= 0 || amountToPay > remaining) {
+    return sendError(res, 400, 'VALIDATION_ERROR', 'Valor de pagamento inválido.', 'amount');
+  }
+
+  const transactionDescription =
+    description?.trim() || `Pagamento agendamento - ${appointment.service_name} (${appointment.pet_name})`;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const transactionRes = await client.query(
+      `INSERT INTO public.transactions
+        (company_id, type, date, description, category, value, status, payment_method, paid_at, reference_type, reference_id)
+       VALUES ($1, 'revenue', $2, $3, 'Serviço', $4, 'paid', $5, $6, 'appointment', $7)
+       RETURNING id`,
+      [
+        cid,
+        toDateOnly(paidAt.toISOString()),
+        transactionDescription,
+        amountToPay,
+        payment_method ?? 'pix',
+        paidAt.toISOString(),
+        appointmentId,
+      ]
+    );
+    const transactionId = transactionRes.rows[0]?.id;
+
+    await client.query(
+      `INSERT INTO public.cash_entries
+        (company_id, transaction_id, entry_type, amount, payment_method, description, occurred_at, created_by, reference_type, reference_id)
+       VALUES ($1, $2, 'inflow', $3, $4, $5, $6, $7, 'appointment', $8)`,
+      [
+        cid,
+        transactionId ?? null,
+        amountToPay,
+        payment_method ?? 'pix',
+        transactionDescription,
+        paidAt.toISOString(),
+        req.userId ?? null,
+        appointmentId,
+      ]
+    );
+    await client.query('COMMIT');
+
+    const newPaidTotal = Number((paidTotal + amountToPay).toFixed(2));
+    res.status(201).json({
+      appointment_id: appointmentId,
+      transaction_id: transactionId,
+      amount: amountToPay,
+      payment_method: payment_method ?? 'pix',
+      paid_total: newPaidTotal,
+      remaining: Number(Math.max(0, servicePrice - newPaidTotal).toFixed(2)),
+      payment_status: newPaidTotal >= servicePrice ? 'paid' : 'partial',
+      service_price: servicePrice,
+      client_name: appointment.client_name,
+      pet_name: appointment.pet_name,
+      service_name: appointment.service_name,
+    });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('payAppointment:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao registrar pagamento.');
+  } finally {
+    client.release();
   }
 }

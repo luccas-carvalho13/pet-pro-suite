@@ -31,7 +31,8 @@ function normalizeSql(text: string): string {
 type MockState = {
   users: Array<{ id: string; email: string; encrypted_password: string; raw_user_meta_data: { full_name: string } }>;
   profiles: Array<{ id: string; company_id: string | null }>;
-  companies: Array<{ id: string; name: string }>;
+  companies: Array<{ id: string; name: string; status: string; current_plan_id: string | null }>;
+  plans: Array<{ id: string; name: string; max_users: number | null; max_pets: number | null; features: Record<string, unknown> }>;
   roles: Array<{ user_id: string; role: string; company_id: string | null }>;
   clients: Array<{ id: string; name: string; email: string | null; phone: string | null; address: string | null; created_at: string }>;
   pets: Array<{ id: string; client_id: string; name: string; species: string; breed: string | null; birth_date: string | null; created_at: string }>;
@@ -59,7 +60,16 @@ function createState(): MockState {
       { id: USER_ID, company_id: COMPANY_ID },
       { id: ADMIN_ID, company_id: COMPANY_ID },
     ],
-    companies: [{ id: COMPANY_ID, name: 'Pet Pro Test' }],
+    companies: [{ id: COMPANY_ID, name: 'Pet Pro Test', status: 'active', current_plan_id: 'plan-pro' }],
+    plans: [
+      {
+        id: 'plan-pro',
+        name: 'Pro',
+        max_users: 10,
+        max_pets: 500,
+        features: { appointments: true, financial: true, reports: true, inventory: true },
+      },
+    ],
     roles: [{ user_id: ADMIN_ID, role: 'admin', company_id: COMPANY_ID }],
     clients: [
       {
@@ -110,6 +120,35 @@ function installMockQuery(state: MockState) {
       const id = String(params[0] ?? '');
       const company = state.companies.find((c) => c.id === id);
       return result(company ? [company] : []);
+    }
+
+    if (sql.includes('from public.companies c left join public.plans p on p.id = c.current_plan_id where c.id = $1')) {
+      const companyId = String(params[0] ?? '');
+      const company = state.companies.find((c) => c.id === companyId);
+      if (!company) return result([]);
+      const plan = state.plans.find((p) => p.id === company.current_plan_id);
+      return result([
+        {
+          company_status: company.status,
+          plan_id: plan?.id ?? null,
+          plan_name: plan?.name ?? null,
+          max_users: plan?.max_users ?? null,
+          max_pets: plan?.max_pets ?? null,
+          features: plan?.features ?? null,
+        },
+      ]);
+    }
+
+    if (sql.startsWith('select reminders from public.notification_settings where company_id = $1')) {
+      return result([{ reminders: true }]);
+    }
+
+    if (sql.includes('with latest as ( select id from public.reminder_jobs')) {
+      return result([]);
+    }
+
+    if (sql.startsWith('insert into public.reminder_jobs')) {
+      return result([{ id: 'reminder-1' }]);
     }
 
     if (sql.includes("from public.user_roles where user_id = $1 and role = 'superadmin'")) {
@@ -167,6 +206,17 @@ function installMockQuery(state: MockState) {
     if (sql.startsWith('select id from public.pets where id = $1 and company_id = $2')) {
       const id = String(params[0] ?? '');
       return result(state.pets.some((p) => p.id === id) ? [{ id }] : []);
+    }
+
+    if (sql.startsWith('select count(*)::int as c from public.profiles where company_id = $1')) {
+      const companyId = String(params[0] ?? '');
+      return result([{ c: state.profiles.filter((p) => p.company_id === companyId).length }]);
+    }
+
+    if (sql.startsWith('select count(*)::int as c from public.pets where company_id = $1')) {
+      const companyId = String(params[0] ?? '');
+      void companyId;
+      return result([{ c: state.pets.length }]);
     }
 
     if (sql.startsWith('select id from public.services where id = $1 and company_id = $2')) {

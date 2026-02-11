@@ -25,6 +25,9 @@ run_sql < db/migrations/005_settings.sql
 run_sql < db/migrations/006_user_security.sql
 run_sql < db/migrations/007_audit_logs.sql
 run_sql < db/migrations/008_listing_indexes.sql
+run_sql < db/migrations/009_medical_records.sql
+run_sql < db/migrations/010_reminder_jobs.sql
+run_sql < db/migrations/011_cashbook_payments.sql
 run_sql < scripts/local/02_disable_rls_local.sql
 run_sql < db/seed.sql
 

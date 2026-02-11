@@ -5,6 +5,7 @@ export type ApiErrorCode =
   | 'VALIDATION_ERROR'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
+  | 'PLAN_LIMIT'
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'INTERNAL_ERROR';
