@@ -7,8 +7,30 @@
 import { Response } from 'express';
 import { pool } from '../db.js';
 import type { AuthReq } from '../middleware.js';
+import { parseWithSchema, sendError } from '../http-error.js';
+import {
+  appointmentPayloadSchema,
+  appearanceSettingsSchema,
+  clientPayloadSchema,
+  companyPayloadSchema,
+  companySettingsSchema,
+  companyUserRoleSchema,
+  notificationSettingsSchema,
+  planPayloadSchema,
+  productPayloadSchema,
+  securitySettingsSchema,
+  servicePayloadSchema,
+  transactionPayloadSchema,
+  petPayloadSchema,
+} from '../validation.js';
+import { writeAuditLog } from '../audit.js';
 
 const companyId = (req: AuthReq) => req.companyId;
+const toNull = (value?: string | null) => {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
 
 export async function dashboardStats(req: AuthReq, res: Response) {
   try {
@@ -349,33 +371,26 @@ export async function updateCompanySettings(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { name, cnpj, phone, address, contact_email, website, hours } = req.body as {
-      name?: string;
-      cnpj?: string;
-      phone?: string;
-      address?: string;
-      contact_email?: string;
-      website?: string;
-      hours?: string;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome da empresa é obrigatório.' });
+    const parsed = parseWithSchema(res, companySettingsSchema, req.body);
+    if (!parsed) return;
+    const { name, cnpj, phone, address, contact_email, website, hours } = parsed;
     await pool.query(
       `UPDATE public.companies SET name = $1, cnpj = $2, phone = $3, address = $4 WHERE id = $5`,
-      [name.trim(), cnpj?.trim() || null, phone?.trim() || null, address?.trim() || null, cid]
+      [name.trim(), toNull(cnpj), toNull(phone), toNull(address), cid]
     );
     await pool.query(
       `INSERT INTO public.company_settings (company_id, contact_email, website, hours)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (company_id) DO UPDATE SET
-         contact_email = EXCLUDED.contact_email,
-         website = EXCLUDED.website,
-         hours = EXCLUDED.hours`,
-      [cid, contact_email?.trim() || null, website?.trim() || null, hours?.trim() || null]
+        contact_email = EXCLUDED.contact_email,
+        website = EXCLUDED.website,
+        hours = EXCLUDED.hours`,
+      [cid, toNull(contact_email), toNull(website), toNull(hours)]
     );
     res.json({ ok: true });
   } catch (e) {
     console.error('updateCompanySettings:', e);
-    res.status(500).json({ error: 'Erro ao salvar configurações.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao salvar configurações.');
   }
 }
 
@@ -405,12 +420,9 @@ export async function updateNotificationSettings(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { reminders, low_stock, payment_receipt, pet_birthday } = req.body as {
-      reminders?: boolean;
-      low_stock?: boolean;
-      payment_receipt?: boolean;
-      pet_birthday?: boolean;
-    };
+    const parsed = parseWithSchema(res, notificationSettingsSchema, req.body);
+    if (!parsed) return;
+    const { reminders, low_stock, payment_receipt, pet_birthday } = parsed;
     await pool.query(
       `INSERT INTO public.notification_settings (company_id, reminders, low_stock, payment_receipt, pet_birthday)
        VALUES ($1, $2, $3, $4, $5)
@@ -424,7 +436,7 @@ export async function updateNotificationSettings(req: AuthReq, res: Response) {
     res.json({ ok: true });
   } catch (e) {
     console.error('updateNotificationSettings:', e);
-    res.status(500).json({ error: 'Erro ao salvar notificações.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao salvar notificações.');
   }
 }
 
@@ -452,11 +464,9 @@ export async function updateAppearanceSettings(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { theme, primary_color, logo_url } = req.body as {
-      theme?: string;
-      primary_color?: string;
-      logo_url?: string;
-    };
+    const parsed = parseWithSchema(res, appearanceSettingsSchema, req.body);
+    if (!parsed) return;
+    const { theme, primary_color, logo_url } = parsed;
     await pool.query(
       `INSERT INTO public.appearance_settings (company_id, theme, primary_color, logo_url)
        VALUES ($1, $2, $3, $4)
@@ -464,12 +474,12 @@ export async function updateAppearanceSettings(req: AuthReq, res: Response) {
          theme = EXCLUDED.theme,
          primary_color = EXCLUDED.primary_color,
          logo_url = EXCLUDED.logo_url`,
-      [cid, theme ?? 'light', primary_color ?? 'petpro', logo_url?.trim() || null]
+      [cid, theme ?? 'light', primary_color ?? 'petpro', toNull(logo_url)]
     );
     res.json({ ok: true });
   } catch (e) {
     console.error('updateAppearanceSettings:', e);
-    res.status(500).json({ error: 'Erro ao salvar aparência.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao salvar aparência.');
   }
 }
 
@@ -490,8 +500,10 @@ export async function getUserSecuritySettings(req: AuthReq, res: Response) {
 
 export async function updateUserSecuritySettings(req: AuthReq, res: Response) {
   try {
-    if (!req.userId) return res.status(401).json({ error: 'Não autenticado.' });
-    const { two_factor_enabled } = req.body as { two_factor_enabled?: boolean };
+    if (!req.userId) return sendError(res, 401, 'UNAUTHORIZED', 'Não autenticado.');
+    const parsed = parseWithSchema(res, securitySettingsSchema, req.body);
+    if (!parsed) return;
+    const { two_factor_enabled } = parsed;
     await pool.query(
       `INSERT INTO public.user_security_settings (user_id, two_factor_enabled)
        VALUES ($1, $2)
@@ -501,7 +513,7 @@ export async function updateUserSecuritySettings(req: AuthReq, res: Response) {
     res.json({ ok: true });
   } catch (e) {
     console.error('updateUserSecuritySettings:', e);
-    res.status(500).json({ error: 'Erro ao salvar segurança.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao salvar segurança.');
   }
 }
 
@@ -531,23 +543,32 @@ export async function getCompanyUsers(req: AuthReq, res: Response) {
 
 export async function updateCompanyUserRole(req: AuthReq, res: Response) {
   try {
-    if (!req.isAdmin) return res.status(403).json({ error: 'Acesso restrito a administradores.' });
+    if (!req.isAdmin) return sendError(res, 403, 'FORBIDDEN', 'Acesso restrito a administradores.');
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
     const userId = req.params.id;
-    const { role } = req.body as { role?: string };
-    if (!role) return res.status(400).json({ error: 'Role é obrigatória.' });
-    const allowed = ['superadmin', 'admin', 'supervisor', 'atendente', 'usuario'];
-    if (!allowed.includes(role)) return res.status(400).json({ error: 'Role inválida.' });
+    const parsed = parseWithSchema(res, companyUserRoleSchema, req.body);
+    if (!parsed) return;
+    const { role } = parsed;
     await pool.query(`DELETE FROM public.user_roles WHERE user_id = $1 AND company_id = $2`, [userId, cid]);
     await pool.query(
       `INSERT INTO public.user_roles (user_id, role, company_id) VALUES ($1, $2, $3)`,
       [userId, role, cid]
     );
+    await writeAuditLog({
+      actor_user_id: req.userId ?? null,
+      company_id: cid,
+      ip_address: req.ip ?? null,
+      user_agent: req.headers['user-agent'] ?? null,
+      action: 'user.role.updated',
+      entity_type: 'user',
+      entity_id: userId,
+      metadata: { role },
+    });
     res.json({ ok: true });
   } catch (e) {
     console.error('updateCompanyUserRole:', e);
-    res.status(500).json({ error: 'Erro ao atualizar role.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar role.');
   }
 }
 
@@ -632,83 +653,94 @@ export async function getPlans(req: AuthReq, res: Response) {
 
 export async function updatePlan(req: AuthReq, res: Response) {
   try {
-    if (!req.isSuperAdmin) return res.status(403).json({ error: 'Acesso restrito a superadmin.' });
+    if (!req.isSuperAdmin) return sendError(res, 403, 'FORBIDDEN', 'Acesso restrito a superadmin.');
     const id = req.params.id;
-    const { name, description, price, trial_days, max_users, max_pets, is_active } = req.body as {
-      name?: string;
-      description?: string;
-      price?: number;
-      trial_days?: number;
-      max_users?: number;
-      max_pets?: number;
-      is_active?: boolean;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
+    const parsed = parseWithSchema(res, planPayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, description, price, trial_days, max_users, max_pets, is_active } = parsed;
     const { rows } = await pool.query(
       `UPDATE public.plans
        SET name = $1, description = $2, price = $3, trial_days = $4, max_users = $5, max_pets = $6, is_active = $7
        WHERE id = $8
        RETURNING id, name, description, price, trial_days, max_users, max_pets, is_active`,
-      [name.trim(), description?.trim() || null, Number(price ?? 0), Number(trial_days ?? 0), max_users ?? null, max_pets ?? null, !!is_active, id]
+      [name.trim(), description?.trim() || null, Number(price), Number(trial_days), max_users ?? null, max_pets ?? null, !!is_active, id]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Plano não encontrado.' });
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Plano não encontrado.');
+    await writeAuditLog({
+      actor_user_id: req.userId ?? null,
+      company_id: req.companyId ?? null,
+      ip_address: req.ip ?? null,
+      user_agent: req.headers['user-agent'] ?? null,
+      action: 'plan.updated',
+      entity_type: 'plan',
+      entity_id: id,
+      metadata: { name, price, trial_days, max_users, max_pets, is_active },
+    });
     res.json(rows[0]);
   } catch (e) {
     console.error('updatePlan:', e);
-    res.status(500).json({ error: 'Erro ao atualizar plano.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar plano.');
   }
 }
 
 export async function createCompany(req: AuthReq, res: Response) {
   try {
-    if (!req.isSuperAdmin) return res.status(403).json({ error: 'Acesso restrito a superadmin.' });
-    const { name, cnpj, phone, address, status, current_plan_id } = req.body as {
-      name?: string;
-      cnpj?: string;
-      phone?: string;
-      address?: string;
-      status?: string;
-      current_plan_id?: string;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
+    if (!req.isSuperAdmin) return sendError(res, 403, 'FORBIDDEN', 'Acesso restrito a superadmin.');
+    const parsed = parseWithSchema(res, companyPayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, cnpj, phone, address, status, current_plan_id } = parsed;
     const { rows } = await pool.query(
       `INSERT INTO public.companies (name, cnpj, phone, address, status, current_plan_id)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, name, status, created_at`,
-      [name.trim(), cnpj?.trim() || null, phone?.trim() || null, address?.trim() || null, status ?? 'trial', current_plan_id ?? null]
+      [name.trim(), toNull(cnpj), toNull(phone), toNull(address), status ?? 'trial', toNull(current_plan_id ?? null)]
     );
+    await writeAuditLog({
+      actor_user_id: req.userId ?? null,
+      company_id: req.companyId ?? null,
+      ip_address: req.ip ?? null,
+      user_agent: req.headers['user-agent'] ?? null,
+      action: 'company.created',
+      entity_type: 'company',
+      entity_id: rows[0]?.id,
+      metadata: { name, status: status ?? 'trial', current_plan_id: toNull(current_plan_id ?? null) },
+    });
     res.status(201).json(rows[0]);
   } catch (e) {
     console.error('createCompany:', e);
-    res.status(500).json({ error: 'Erro ao criar empresa.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar empresa.');
   }
 }
 
 export async function updateCompany(req: AuthReq, res: Response) {
   try {
-    if (!req.isSuperAdmin) return res.status(403).json({ error: 'Acesso restrito a superadmin.' });
+    if (!req.isSuperAdmin) return sendError(res, 403, 'FORBIDDEN', 'Acesso restrito a superadmin.');
     const id = req.params.id;
-    const { name, cnpj, phone, address, status, current_plan_id } = req.body as {
-      name?: string;
-      cnpj?: string;
-      phone?: string;
-      address?: string;
-      status?: string;
-      current_plan_id?: string;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
+    const parsed = parseWithSchema(res, companyPayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, cnpj, phone, address, status, current_plan_id } = parsed;
     const { rows } = await pool.query(
       `UPDATE public.companies
        SET name = $1, cnpj = $2, phone = $3, address = $4, status = $5, current_plan_id = $6
        WHERE id = $7
        RETURNING id, name, status, created_at`,
-      [name.trim(), cnpj?.trim() || null, phone?.trim() || null, address?.trim() || null, status ?? 'trial', current_plan_id ?? null, id]
+      [name.trim(), toNull(cnpj), toNull(phone), toNull(address), status ?? 'trial', toNull(current_plan_id ?? null), id]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Empresa não encontrada.' });
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Empresa não encontrada.');
+    await writeAuditLog({
+      actor_user_id: req.userId ?? null,
+      company_id: req.companyId ?? null,
+      ip_address: req.ip ?? null,
+      user_agent: req.headers['user-agent'] ?? null,
+      action: 'company.updated',
+      entity_type: 'company',
+      entity_id: id,
+      metadata: { name, status: status ?? 'trial', current_plan_id: toNull(current_plan_id ?? null) },
+    });
     res.json(rows[0]);
   } catch (e) {
     console.error('updateCompany:', e);
-    res.status(500).json({ error: 'Erro ao atualizar empresa.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar empresa.');
   }
 }
 
@@ -731,7 +763,7 @@ export async function exportCompanies(req: AuthReq, res: Response) {
 function ensureCompanyId(req: AuthReq, res: Response): string | null {
   const cid = companyId(req);
   if (!cid) {
-    res.status(403).json({ error: 'Usuário não está vinculado a nenhuma empresa.' });
+    sendError(res, 403, 'FORBIDDEN', 'Usuário não está vinculado a nenhuma empresa.');
     return null;
   }
   return cid;
@@ -753,18 +785,14 @@ export async function createClient(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { name, email, phone, address } = req.body as {
-      name?: string;
-      email?: string;
-      phone?: string;
-      address?: string;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
+    const parsed = parseWithSchema(res, clientPayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, email, phone, address } = parsed;
     const { rows } = await pool.query(
       `INSERT INTO public.clients (company_id, name, email, phone, address)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, name, email, phone, address, created_at`,
-      [cid, name.trim(), email?.trim() || null, phone?.trim() || null, address?.trim() || null]
+      [cid, name.trim(), toNull(email), toNull(phone), toNull(address)]
     );
     const c = rows[0];
     res.status(201).json({
@@ -779,7 +807,7 @@ export async function createClient(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('createClient:', e);
-    res.status(500).json({ error: 'Erro ao criar cliente.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar cliente.');
   }
 }
 
@@ -788,21 +816,17 @@ export async function updateClient(req: AuthReq, res: Response) {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
     const id = req.params.id;
-    const { name, email, phone, address } = req.body as {
-      name?: string;
-      email?: string;
-      phone?: string;
-      address?: string;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
+    const parsed = parseWithSchema(res, clientPayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, email, phone, address } = parsed;
     const { rows } = await pool.query(
       `UPDATE public.clients
        SET name = $1, email = $2, phone = $3, address = $4
        WHERE id = $5 AND company_id = $6
        RETURNING id, name, email, phone, address, created_at`,
-      [name.trim(), email?.trim() || null, phone?.trim() || null, address?.trim() || null, id, cid]
+      [name.trim(), toNull(email), toNull(phone), toNull(address), id, cid]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Cliente não encontrado.' });
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Cliente não encontrado.');
     const c = rows[0];
     const petsCount = await pool.query(
       `SELECT COUNT(*)::int AS c FROM public.pets WHERE client_id = $1`,
@@ -820,7 +844,7 @@ export async function updateClient(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('updateClient:', e);
-    res.status(500).json({ error: 'Erro ao atualizar cliente.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar cliente.');
   }
 }
 
@@ -833,11 +857,11 @@ export async function deleteClient(req: AuthReq, res: Response) {
       `DELETE FROM public.clients WHERE id = $1 AND company_id = $2`,
       [id, cid]
     );
-    if (!rowCount) return res.status(404).json({ error: 'Cliente não encontrado.' });
+    if (!rowCount) return sendError(res, 404, 'NOT_FOUND', 'Cliente não encontrado.');
     res.json({ ok: true });
   } catch (e) {
     console.error('deleteClient:', e);
-    res.status(500).json({ error: 'Erro ao remover cliente.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover cliente.');
   }
 }
 
@@ -845,23 +869,16 @@ export async function createPet(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { client_id, name, species, breed, birth_date } = req.body as {
-      client_id?: string;
-      name?: string;
-      species?: string;
-      breed?: string;
-      birth_date?: string;
-    };
-    if (!client_id) return res.status(400).json({ error: 'Tutor é obrigatório.' });
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome do pet é obrigatório.' });
-    if (!species?.trim()) return res.status(400).json({ error: 'Espécie é obrigatória.' });
+    const parsed = parseWithSchema(res, petPayloadSchema, req.body);
+    if (!parsed) return;
+    const { client_id, name, species, breed, birth_date } = parsed;
     const clientOk = await ensureCompanyRow('clients', client_id, cid);
-    if (!clientOk) return res.status(400).json({ error: 'Tutor inválido.' });
+    if (!clientOk) return sendError(res, 400, 'VALIDATION_ERROR', 'Tutor inválido.', 'client_id');
     const { rows } = await pool.query(
       `INSERT INTO public.pets (company_id, client_id, name, species, breed, birth_date)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, name, species, breed, birth_date, created_at`,
-      [cid, client_id, name.trim(), species.trim(), breed?.trim() || null, birth_date || null]
+      [cid, client_id, name.trim(), species.trim(), toNull(breed), toNull(birth_date)]
     );
     const owner = await pool.query(`SELECT name FROM public.clients WHERE id = $1`, [client_id]);
     const p = rows[0];
@@ -879,7 +896,7 @@ export async function createPet(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('createPet:', e);
-    res.status(500).json({ error: 'Erro ao criar pet.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar pet.');
   }
 }
 
@@ -888,26 +905,19 @@ export async function updatePet(req: AuthReq, res: Response) {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
     const id = req.params.id;
-    const { client_id, name, species, breed, birth_date } = req.body as {
-      client_id?: string;
-      name?: string;
-      species?: string;
-      breed?: string;
-      birth_date?: string;
-    };
-    if (!client_id) return res.status(400).json({ error: 'Tutor é obrigatório.' });
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome do pet é obrigatório.' });
-    if (!species?.trim()) return res.status(400).json({ error: 'Espécie é obrigatória.' });
+    const parsed = parseWithSchema(res, petPayloadSchema, req.body);
+    if (!parsed) return;
+    const { client_id, name, species, breed, birth_date } = parsed;
     const clientOk = await ensureCompanyRow('clients', client_id, cid);
-    if (!clientOk) return res.status(400).json({ error: 'Tutor inválido.' });
+    if (!clientOk) return sendError(res, 400, 'VALIDATION_ERROR', 'Tutor inválido.', 'client_id');
     const { rows } = await pool.query(
       `UPDATE public.pets
        SET client_id = $1, name = $2, species = $3, breed = $4, birth_date = $5
        WHERE id = $6 AND company_id = $7
        RETURNING id, name, species, breed, birth_date, created_at`,
-      [client_id, name.trim(), species.trim(), breed?.trim() || null, birth_date || null, id, cid]
+      [client_id, name.trim(), species.trim(), toNull(breed), toNull(birth_date), id, cid]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Pet não encontrado.' });
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Pet não encontrado.');
     const owner = await pool.query(`SELECT name FROM public.clients WHERE id = $1`, [client_id]);
     const p = rows[0];
     res.json({
@@ -924,7 +934,7 @@ export async function updatePet(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('updatePet:', e);
-    res.status(500).json({ error: 'Erro ao atualizar pet.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar pet.');
   }
 }
 
@@ -937,11 +947,11 @@ export async function deletePet(req: AuthReq, res: Response) {
       `DELETE FROM public.pets WHERE id = $1 AND company_id = $2`,
       [id, cid]
     );
-    if (!rowCount) return res.status(404).json({ error: 'Pet não encontrado.' });
+    if (!rowCount) return sendError(res, 404, 'NOT_FOUND', 'Pet não encontrado.');
     res.json({ ok: true });
   } catch (e) {
     console.error('deletePet:', e);
-    res.status(500).json({ error: 'Erro ao remover pet.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover pet.');
   }
 }
 
@@ -949,16 +959,9 @@ export async function createService(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { name, category, duration_minutes, price, commission_pct } = req.body as {
-      name?: string;
-      category?: string;
-      duration_minutes?: number;
-      price?: number;
-      commission_pct?: number;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
-    if (!category?.trim()) return res.status(400).json({ error: 'Categoria é obrigatória.' });
-    if (!price && price !== 0) return res.status(400).json({ error: 'Preço é obrigatório.' });
+    const parsed = parseWithSchema(res, servicePayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, category, duration_minutes, price, commission_pct } = parsed;
     const { rows } = await pool.query(
       `INSERT INTO public.services (company_id, name, category, duration_minutes, price, commission_pct)
        VALUES ($1, $2, $3, $4, $5, $6)
@@ -976,7 +979,7 @@ export async function createService(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('createService:', e);
-    res.status(500).json({ error: 'Erro ao criar serviço.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar serviço.');
   }
 }
 
@@ -985,16 +988,9 @@ export async function updateService(req: AuthReq, res: Response) {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
     const id = req.params.id;
-    const { name, category, duration_minutes, price, commission_pct } = req.body as {
-      name?: string;
-      category?: string;
-      duration_minutes?: number;
-      price?: number;
-      commission_pct?: number;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
-    if (!category?.trim()) return res.status(400).json({ error: 'Categoria é obrigatória.' });
-    if (!price && price !== 0) return res.status(400).json({ error: 'Preço é obrigatório.' });
+    const parsed = parseWithSchema(res, servicePayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, category, duration_minutes, price, commission_pct } = parsed;
     const { rows } = await pool.query(
       `UPDATE public.services
        SET name = $1, category = $2, duration_minutes = $3, price = $4, commission_pct = $5
@@ -1002,7 +998,7 @@ export async function updateService(req: AuthReq, res: Response) {
        RETURNING id, name, category, duration_minutes, price, commission_pct`,
       [name.trim(), category.trim(), Number(duration_minutes ?? 30), Number(price), commission_pct ?? null, id, cid]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Serviço não encontrado.' });
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Serviço não encontrado.');
     const s = rows[0];
     res.json({
       id: s.id,
@@ -1014,7 +1010,7 @@ export async function updateService(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('updateService:', e);
-    res.status(500).json({ error: 'Erro ao atualizar serviço.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar serviço.');
   }
 }
 
@@ -1027,11 +1023,11 @@ export async function deleteService(req: AuthReq, res: Response) {
       `DELETE FROM public.services WHERE id = $1 AND company_id = $2`,
       [id, cid]
     );
-    if (!rowCount) return res.status(404).json({ error: 'Serviço não encontrado.' });
+    if (!rowCount) return sendError(res, 404, 'NOT_FOUND', 'Serviço não encontrado.');
     res.json({ ok: true });
   } catch (e) {
     console.error('deleteService:', e);
-    res.status(500).json({ error: 'Erro ao remover serviço.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover serviço.');
   }
 }
 
@@ -1039,22 +1035,14 @@ export async function createProduct(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { name, category, stock, min_stock, price, unit } = req.body as {
-      name?: string;
-      category?: string;
-      stock?: number;
-      min_stock?: number;
-      price?: number;
-      unit?: string;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
-    if (!category?.trim()) return res.status(400).json({ error: 'Categoria é obrigatória.' });
-    if (!price && price !== 0) return res.status(400).json({ error: 'Preço é obrigatório.' });
+    const parsed = parseWithSchema(res, productPayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, category, stock, min_stock, price, unit } = parsed;
     const { rows } = await pool.query(
       `INSERT INTO public.products (company_id, name, category, stock, min_stock, price, unit)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, name, category, stock, min_stock, price`,
-      [cid, name.trim(), category.trim(), Number(stock ?? 0), Number(min_stock ?? 0), Number(price), unit?.trim() || 'un']
+      [cid, name.trim(), category.trim(), Number(stock ?? 0), Number(min_stock ?? 0), Number(price), toNull(unit) ?? 'un']
     );
     const p = rows[0];
     let status = 'normal';
@@ -1071,7 +1059,7 @@ export async function createProduct(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('createProduct:', e);
-    res.status(500).json({ error: 'Erro ao criar produto.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar produto.');
   }
 }
 
@@ -1080,25 +1068,17 @@ export async function updateProduct(req: AuthReq, res: Response) {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
     const id = req.params.id;
-    const { name, category, stock, min_stock, price, unit } = req.body as {
-      name?: string;
-      category?: string;
-      stock?: number;
-      min_stock?: number;
-      price?: number;
-      unit?: string;
-    };
-    if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório.' });
-    if (!category?.trim()) return res.status(400).json({ error: 'Categoria é obrigatória.' });
-    if (!price && price !== 0) return res.status(400).json({ error: 'Preço é obrigatório.' });
+    const parsed = parseWithSchema(res, productPayloadSchema, req.body);
+    if (!parsed) return;
+    const { name, category, stock, min_stock, price, unit } = parsed;
     const { rows } = await pool.query(
       `UPDATE public.products
        SET name = $1, category = $2, stock = $3, min_stock = $4, price = $5, unit = $6
        WHERE id = $7 AND company_id = $8
        RETURNING id, name, category, stock, min_stock, price`,
-      [name.trim(), category.trim(), Number(stock ?? 0), Number(min_stock ?? 0), Number(price), unit?.trim() || 'un', id, cid]
+      [name.trim(), category.trim(), Number(stock ?? 0), Number(min_stock ?? 0), Number(price), toNull(unit) ?? 'un', id, cid]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Produto não encontrado.' });
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Produto não encontrado.');
     const p = rows[0];
     let status = 'normal';
     if (Number(p.stock) < Number(p.min_stock) * 0.5) status = 'critical';
@@ -1114,7 +1094,7 @@ export async function updateProduct(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('updateProduct:', e);
-    res.status(500).json({ error: 'Erro ao atualizar produto.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar produto.');
   }
 }
 
@@ -1127,11 +1107,11 @@ export async function deleteProduct(req: AuthReq, res: Response) {
       `DELETE FROM public.products WHERE id = $1 AND company_id = $2`,
       [id, cid]
     );
-    if (!rowCount) return res.status(404).json({ error: 'Produto não encontrado.' });
+    if (!rowCount) return sendError(res, 404, 'NOT_FOUND', 'Produto não encontrado.');
     res.json({ ok: true });
   } catch (e) {
     console.error('deleteProduct:', e);
-    res.status(500).json({ error: 'Erro ao remover produto.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover produto.');
   }
 }
 
@@ -1139,38 +1119,27 @@ export async function createAppointment(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { client_id, pet_id, service_id, scheduled_at, duration_minutes, status, vet_name, notes } = req.body as {
-      client_id?: string;
-      pet_id?: string;
-      service_id?: string;
-      scheduled_at?: string;
-      duration_minutes?: number;
-      status?: string;
-      vet_name?: string;
-      notes?: string;
-    };
-    if (!client_id || !pet_id || !service_id) {
-      return res.status(400).json({ error: 'Cliente, pet e serviço são obrigatórios.' });
-    }
-    if (!scheduled_at) return res.status(400).json({ error: 'Data/hora é obrigatória.' });
+    const parsed = parseWithSchema(res, appointmentPayloadSchema, req.body);
+    if (!parsed) return;
+    const { client_id, pet_id, service_id, scheduled_at, duration_minutes, status, vet_name, notes } = parsed;
     const clientOk = await ensureCompanyRow('clients', client_id, cid);
     const petOk = await ensureCompanyRow('pets', pet_id, cid);
     const serviceOk = await ensureCompanyRow('services', service_id, cid);
     if (!clientOk || !petOk || !serviceOk) {
-      return res.status(400).json({ error: 'Dados inválidos para o agendamento.' });
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Dados inválidos para o agendamento.');
     }
     const petOwner = await pool.query(
       `SELECT client_id FROM public.pets WHERE id = $1`,
       [pet_id]
     );
     if (petOwner.rows[0]?.client_id !== client_id) {
-      return res.status(400).json({ error: 'Pet não pertence ao cliente informado.' });
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Pet não pertence ao cliente informado.', 'pet_id');
     }
     const { rows } = await pool.query(
       `INSERT INTO public.appointments (company_id, client_id, pet_id, service_id, scheduled_at, duration_minutes, status, vet_name, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, scheduled_at, duration_minutes, status, vet_name`,
-      [cid, client_id, pet_id, service_id, scheduled_at, Number(duration_minutes ?? 30), status ?? 'scheduled', vet_name?.trim() || null, notes?.trim() || null]
+      [cid, client_id, pet_id, service_id, scheduled_at, Number(duration_minutes ?? 30), status ?? 'scheduled', toNull(vet_name), toNull(notes)]
     );
     const joined = await pool.query(
       `SELECT c.name AS client_name, p.name AS pet_name, p.species AS pet_species, s.name AS service_name
@@ -1199,7 +1168,7 @@ export async function createAppointment(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('createAppointment:', e);
-    res.status(500).json({ error: 'Erro ao criar agendamento.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar agendamento.');
   }
 }
 
@@ -1208,41 +1177,30 @@ export async function updateAppointment(req: AuthReq, res: Response) {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
     const id = req.params.id;
-    const { client_id, pet_id, service_id, scheduled_at, duration_minutes, status, vet_name, notes } = req.body as {
-      client_id?: string;
-      pet_id?: string;
-      service_id?: string;
-      scheduled_at?: string;
-      duration_minutes?: number;
-      status?: string;
-      vet_name?: string;
-      notes?: string;
-    };
-    if (!client_id || !pet_id || !service_id) {
-      return res.status(400).json({ error: 'Cliente, pet e serviço são obrigatórios.' });
-    }
-    if (!scheduled_at) return res.status(400).json({ error: 'Data/hora é obrigatória.' });
+    const parsed = parseWithSchema(res, appointmentPayloadSchema, req.body);
+    if (!parsed) return;
+    const { client_id, pet_id, service_id, scheduled_at, duration_minutes, status, vet_name, notes } = parsed;
     const clientOk = await ensureCompanyRow('clients', client_id, cid);
     const petOk = await ensureCompanyRow('pets', pet_id, cid);
     const serviceOk = await ensureCompanyRow('services', service_id, cid);
     if (!clientOk || !petOk || !serviceOk) {
-      return res.status(400).json({ error: 'Dados inválidos para o agendamento.' });
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Dados inválidos para o agendamento.');
     }
     const petOwner = await pool.query(
       `SELECT client_id FROM public.pets WHERE id = $1`,
       [pet_id]
     );
     if (petOwner.rows[0]?.client_id !== client_id) {
-      return res.status(400).json({ error: 'Pet não pertence ao cliente informado.' });
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Pet não pertence ao cliente informado.', 'pet_id');
     }
     const { rows } = await pool.query(
       `UPDATE public.appointments
        SET client_id = $1, pet_id = $2, service_id = $3, scheduled_at = $4, duration_minutes = $5, status = $6, vet_name = $7, notes = $8
        WHERE id = $9 AND company_id = $10
        RETURNING id, scheduled_at, duration_minutes, status, vet_name`,
-      [client_id, pet_id, service_id, scheduled_at, Number(duration_minutes ?? 30), status ?? 'scheduled', vet_name?.trim() || null, notes?.trim() || null, id, cid]
+      [client_id, pet_id, service_id, scheduled_at, Number(duration_minutes ?? 30), status ?? 'scheduled', toNull(vet_name), toNull(notes), id, cid]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Agendamento não encontrado.' });
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Agendamento não encontrado.');
     const joined = await pool.query(
       `SELECT c.name AS client_name, p.name AS pet_name, p.species AS pet_species, s.name AS service_name
        FROM public.clients c
@@ -1270,7 +1228,7 @@ export async function updateAppointment(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('updateAppointment:', e);
-    res.status(500).json({ error: 'Erro ao atualizar agendamento.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar agendamento.');
   }
 }
 
@@ -1283,11 +1241,11 @@ export async function deleteAppointment(req: AuthReq, res: Response) {
       `DELETE FROM public.appointments WHERE id = $1 AND company_id = $2`,
       [id, cid]
     );
-    if (!rowCount) return res.status(404).json({ error: 'Agendamento não encontrado.' });
+    if (!rowCount) return sendError(res, 404, 'NOT_FOUND', 'Agendamento não encontrado.');
     res.json({ ok: true });
   } catch (e) {
     console.error('deleteAppointment:', e);
-    res.status(500).json({ error: 'Erro ao remover agendamento.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover agendamento.');
   }
 }
 
@@ -1295,23 +1253,14 @@ export async function createTransaction(req: AuthReq, res: Response) {
   try {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
-    const { type, date, description, category, value, status } = req.body as {
-      type?: 'revenue' | 'expense';
-      date?: string;
-      description?: string;
-      category?: string;
-      value?: number;
-      status?: string;
-    };
-    if (!type) return res.status(400).json({ error: 'Tipo é obrigatório.' });
-    if (!date) return res.status(400).json({ error: 'Data é obrigatória.' });
-    if (!description?.trim()) return res.status(400).json({ error: 'Descrição é obrigatória.' });
-    if (value === undefined || value === null) return res.status(400).json({ error: 'Valor é obrigatório.' });
+    const parsed = parseWithSchema(res, transactionPayloadSchema, req.body);
+    if (!parsed) return;
+    const { type, date, description, category, value, status } = parsed;
     const { rows } = await pool.query(
       `INSERT INTO public.transactions (company_id, type, date, description, category, value, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, date, description, category, value, status`,
-      [cid, type, date, description.trim(), category?.trim() || null, Number(value), status?.trim() || null]
+      [cid, type, date, description.trim(), toNull(category), Number(value), toNull(status)]
     );
     const t = rows[0];
     if (type === 'revenue') {
@@ -1333,7 +1282,7 @@ export async function createTransaction(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('createTransaction:', e);
-    res.status(500).json({ error: 'Erro ao criar transação.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar transação.');
   }
 }
 
@@ -1342,26 +1291,17 @@ export async function updateTransaction(req: AuthReq, res: Response) {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
     const id = req.params.id;
-    const { type, date, description, category, value, status } = req.body as {
-      type?: 'revenue' | 'expense';
-      date?: string;
-      description?: string;
-      category?: string;
-      value?: number;
-      status?: string;
-    };
-    if (!type) return res.status(400).json({ error: 'Tipo é obrigatório.' });
-    if (!date) return res.status(400).json({ error: 'Data é obrigatória.' });
-    if (!description?.trim()) return res.status(400).json({ error: 'Descrição é obrigatória.' });
-    if (value === undefined || value === null) return res.status(400).json({ error: 'Valor é obrigatório.' });
+    const parsed = parseWithSchema(res, transactionPayloadSchema, req.body);
+    if (!parsed) return;
+    const { type, date, description, category, value, status } = parsed;
     const { rows } = await pool.query(
       `UPDATE public.transactions
        SET type = $1, date = $2, description = $3, category = $4, value = $5, status = $6
        WHERE id = $7 AND company_id = $8
        RETURNING id, date, description, category, value, status`,
-      [type, date, description.trim(), category?.trim() || null, Number(value), status?.trim() || null, id, cid]
+      [type, date, description.trim(), toNull(category), Number(value), toNull(status), id, cid]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Transação não encontrada.' });
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Transação não encontrada.');
     const t = rows[0];
     if (type === 'revenue') {
       return res.json({
@@ -1382,7 +1322,7 @@ export async function updateTransaction(req: AuthReq, res: Response) {
     });
   } catch (e) {
     console.error('updateTransaction:', e);
-    res.status(500).json({ error: 'Erro ao atualizar transação.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar transação.');
   }
 }
 
@@ -1395,10 +1335,10 @@ export async function deleteTransaction(req: AuthReq, res: Response) {
       `DELETE FROM public.transactions WHERE id = $1 AND company_id = $2`,
       [id, cid]
     );
-    if (!rowCount) return res.status(404).json({ error: 'Transação não encontrada.' });
+    if (!rowCount) return sendError(res, 404, 'NOT_FOUND', 'Transação não encontrada.');
     res.json({ ok: true });
   } catch (e) {
     console.error('deleteTransaction:', e);
-    res.status(500).json({ error: 'Erro ao remover transação.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover transação.');
   }
 }

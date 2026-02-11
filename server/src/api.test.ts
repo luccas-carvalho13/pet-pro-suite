@@ -349,6 +349,27 @@ test('POST /api/pets cria pet com sucesso', async () => {
   assert.equal(res.body.owner, 'Maria');
 });
 
+test('POST /api/pets retorna erro padronizado de validação', async () => {
+  const app = createApp();
+  const login = await request(app).post('/auth/login').send({
+    email: 'user@test.local',
+    password: PASSWORD,
+  });
+
+  const res = await request(app)
+    .post('/api/pets')
+    .set('Authorization', `Bearer ${login.body.token}`)
+    .send({
+      client_id: 'client-1',
+      name: '',
+      species: 'Gato',
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, 'VALIDATION_ERROR');
+  assert.equal(res.body.field, 'name');
+});
+
 test('POST /api/appointments cria agendamento válido', async () => {
   const app = createApp();
   const login = await request(app).post('/auth/login').send({

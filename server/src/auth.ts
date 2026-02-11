@@ -4,6 +4,9 @@ import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { logger } from './logger.js';
 import { jwtSecret } from './config.js';
+import { parseWithSchema, sendError } from './http-error.js';
+import { changePasswordSchema, emailSchema, inviteSchema, loginSchema, registerSchema } from './validation.js';
+import { writeAuditLog } from './audit.js';
 
 function createToken(userId: string): string {
   return jwt.sign({ sub: userId }, jwtSecret, { expiresIn: '7d' });
@@ -11,12 +14,9 @@ function createToken(userId: string): string {
 
 export async function login(req: Request, res: Response) {
   try {
-    const { email, password } = req.body as { email?: string; password?: string };
-    if (!email || !password) {
-      logger.info('[login] 400: e-mail ou senha ausentes');
-      res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
-      return;
-    }
+    const parsed = parseWithSchema(res, loginSchema, req.body);
+    if (!parsed) return;
+    const { email, password } = parsed;
 
     const emailNorm = email.trim().toLowerCase();
     const { rows } = await pool.query(
@@ -26,7 +26,7 @@ export async function login(req: Request, res: Response) {
 
     if (rows.length === 0) {
       logger.info('[login] 401: usuário não encontrado', { email: emailNorm });
-      res.status(401).json({ error: 'E-mail ou senha incorretos.' });
+      sendError(res, 401, 'UNAUTHORIZED', 'E-mail ou senha incorretos.');
       return;
     }
 
@@ -34,7 +34,7 @@ export async function login(req: Request, res: Response) {
     const ok = await bcrypt.compare(password, user.encrypted_password ?? '');
     if (!ok) {
       logger.info('[login] 401: senha incorreta', { email: emailNorm });
-      res.status(401).json({ error: 'E-mail ou senha incorretos.' });
+      sendError(res, 401, 'UNAUTHORIZED', 'E-mail ou senha incorretos.');
       return;
     }
 
@@ -57,17 +57,15 @@ export async function login(req: Request, res: Response) {
     });
   } catch (e) {
     logger.errorFull('[login] 500: erro ao fazer login', e);
-    res.status(500).json({ error: 'Erro ao fazer login.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao fazer login.');
   }
 }
 
 export async function checkEmail(req: Request, res: Response) {
   try {
-    const email = (req.query.email as string)?.trim()?.toLowerCase();
-    if (!email) {
-      res.status(400).json({ available: false, error: 'E-mail é obrigatório.' });
-      return;
-    }
+    const parsedEmail = emailSchema.safeParse((req.query.email as string | undefined)?.trim()?.toLowerCase());
+    if (!parsedEmail.success) return sendError(res, 400, 'VALIDATION_ERROR', 'E-mail é obrigatório.', 'email');
+    const email = parsedEmail.data;
     const { rows } = await pool.query(
       `SELECT id FROM auth.users WHERE email = $1`,
       [email]
@@ -80,16 +78,9 @@ export async function checkEmail(req: Request, res: Response) {
 }
 
 export async function register(req: Request, res: Response) {
-  const body = req.body as {
-    email?: string;
-    password?: string;
-    full_name?: string;
-    user_phone?: string;
-    company_name?: string;
-    company_cnpj?: string;
-    company_phone?: string;
-    company_address?: string;
-  };
+  const parsed = parseWithSchema(res, registerSchema, req.body);
+  if (!parsed) return;
+  const body = parsed;
   logger.info('[register] body', {
     email: body?.email,
     full_name: body?.full_name,
@@ -100,22 +91,6 @@ export async function register(req: Request, res: Response) {
   try {
     const { email, password, full_name, user_phone, company_name, company_cnpj, company_phone, company_address } = body;
 
-    if (!email || !password) {
-      logger.info('[register] 400: e-mail ou senha ausentes');
-      res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
-      return;
-    }
-    if (!company_name?.trim()) {
-      logger.info('[register] 400: nome da empresa ausente');
-      res.status(400).json({ error: 'Nome da empresa é obrigatório.' });
-      return;
-    }
-    if (String(password).length < 6) {
-      logger.info('[register] 400: senha com menos de 6 caracteres');
-      res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
-      return;
-    }
-
     const emailNorm = email.trim().toLowerCase();
     logger.info('[register] verificando e-mail existente', { emailNorm });
     const { rows: existing } = await pool.query(
@@ -124,7 +99,7 @@ export async function register(req: Request, res: Response) {
     );
     if (existing.length > 0) {
       logger.info('[register] 409: e-mail já em uso');
-      res.status(409).json({ error: 'Este e-mail já está em uso.' });
+      sendError(res, 409, 'CONFLICT', 'Este e-mail já está em uso.', 'email');
       return;
     }
 
@@ -143,7 +118,7 @@ export async function register(req: Request, res: Response) {
     const company = companyRows[0];
     if (!company) {
       logger.info('[register] 500: falha ao criar empresa');
-      res.status(500).json({ error: 'Erro ao criar empresa.' });
+      sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar empresa.');
       return;
     }
 
@@ -176,6 +151,16 @@ export async function register(req: Request, res: Response) {
        ON CONFLICT (user_id, role, company_id) DO NOTHING`,
       [user.id, company.id]
     );
+    await writeAuditLog({
+      actor_user_id: user.id,
+      company_id: company.id,
+      ip_address: req.ip ?? null,
+      user_agent: req.headers['user-agent'] ?? null,
+      action: 'company.created',
+      entity_type: 'company',
+      entity_id: company.id,
+      metadata: { created_by: 'self_register', email: emailNorm },
+    });
 
     const token = createToken(user.id);
     logger.info('[register] 201: empresa e usuário criados', {
@@ -193,7 +178,7 @@ export async function register(req: Request, res: Response) {
     });
   } catch (e) {
     logger.errorFull('[register] 500: erro ao criar conta', e);
-    res.status(500).json({ error: 'Erro ao criar conta.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao criar conta.');
   }
 }
 
@@ -254,48 +239,38 @@ export async function changePassword(req: Request & { userId?: string }, res: Re
   try {
     const userId = (req as { userId?: string }).userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Não autenticado.' });
+      return sendError(res, 401, 'UNAUTHORIZED', 'Não autenticado.');
     }
-    const { current_password, new_password } = req.body as { current_password?: string; new_password?: string };
-    if (!current_password || !new_password) {
-      return res.status(400).json({ error: 'Senha atual e nova senha são obrigatórias.' });
-    }
-    if (String(new_password).length < 6) {
-      return res.status(400).json({ error: 'A nova senha deve ter no mínimo 6 caracteres.' });
-    }
+    const parsed = parseWithSchema(res, changePasswordSchema, req.body);
+    if (!parsed) return;
+    const { current_password, new_password } = parsed;
     const { rows } = await pool.query(
       `SELECT id, encrypted_password FROM auth.users WHERE id = $1`,
       [userId]
     );
-    if (!rows[0]) return res.status(401).json({ error: 'Usuário não encontrado.' });
+    if (!rows[0]) return sendError(res, 401, 'UNAUTHORIZED', 'Usuário não encontrado.');
     const ok = await bcrypt.compare(current_password, rows[0].encrypted_password ?? '');
-    if (!ok) return res.status(401).json({ error: 'Senha atual incorreta.' });
+    if (!ok) return sendError(res, 401, 'UNAUTHORIZED', 'Senha atual incorreta.');
     const hash = await bcrypt.hash(new_password, 10);
     await pool.query(`UPDATE auth.users SET encrypted_password = $1 WHERE id = $2`, [hash, userId]);
     res.json({ ok: true });
   } catch (e) {
     logger.errorFull('[changePassword] 500: erro ao alterar senha', e);
-    res.status(500).json({ error: 'Erro ao alterar senha.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao alterar senha.');
   }
 }
 
 export type InviteBody = { full_name?: string; email?: string; phone?: string; password?: string };
 
 export async function invite(req: Request & { userId?: string; companyId?: string | null }, res: Response) {
-  const body = req.body as InviteBody;
+  const parsed = parseWithSchema(res, inviteSchema, req.body);
+  if (!parsed) return;
+  const body = parsed;
   const { full_name, email, phone, password } = body;
   const companyId = req.companyId;
 
   if (!companyId) {
-    res.status(403).json({ error: 'Você precisa estar vinculado a uma empresa para convidar.' });
-    return;
-  }
-  if (!email?.trim() || !password) {
-    res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
-    return;
-  }
-  if (String(password).length < 6) {
-    res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
+    sendError(res, 403, 'FORBIDDEN', 'Você precisa estar vinculado a uma empresa para convidar.');
     return;
   }
 
@@ -303,7 +278,7 @@ export async function invite(req: Request & { userId?: string; companyId?: strin
   try {
     const { rows: existing } = await pool.query(`SELECT id FROM auth.users WHERE email = $1`, [emailNorm]);
     if (existing.length > 0) {
-      res.status(409).json({ error: 'Este e-mail já está em uso.' });
+      sendError(res, 409, 'CONFLICT', 'Este e-mail já está em uso.', 'email');
       return;
     }
 
@@ -331,6 +306,16 @@ export async function invite(req: Request & { userId?: string; companyId?: strin
        ON CONFLICT (user_id, role, company_id) DO NOTHING`,
       [user.id, companyId]
     );
+    await writeAuditLog({
+      actor_user_id: req.userId ?? null,
+      company_id: companyId,
+      ip_address: req.ip ?? null,
+      user_agent: req.headers['user-agent'] ?? null,
+      action: 'user.invited',
+      entity_type: 'user',
+      entity_id: user.id,
+      metadata: { invited_email: user.email, invited_role: 'usuario' },
+    });
     logger.info('[invite] usuário convidado', { userId: user.id, companyId });
     res.status(201).json({
       user: {
@@ -341,6 +326,6 @@ export async function invite(req: Request & { userId?: string; companyId?: strin
     });
   } catch (e) {
     logger.errorFull('[invite] 500: erro ao convidar', e);
-    res.status(500).json({ error: 'Erro ao convidar usuário.' });
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao convidar usuário.');
   }
 }
