@@ -32,6 +32,17 @@ const toNull = (value?: string | null) => {
   return trimmed ? trimmed : null;
 };
 
+function listParams(req: AuthReq) {
+  const pageRaw = Number(req.query.page ?? 1);
+  const limitRaw = Number(req.query.limit ?? 20);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(100, Math.floor(limitRaw)) : 20;
+  const offset = (page - 1) * limit;
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const order = req.query.order === 'asc' ? 'ASC' : 'DESC';
+  return { page, limit, offset, q, order };
+}
+
 export async function dashboardStats(req: AuthReq, res: Response) {
   try {
     const cid = companyId(req);
@@ -99,11 +110,16 @@ export async function getClients(req: AuthReq, res: Response) {
   try {
     const cid = companyId(req);
     if (!cid) return res.json([]);
+    const { limit, offset, q, order } = listParams(req);
     const { rows } = await pool.query(
       `SELECT c.id, c.name, c.email, c.phone, c.address, c.created_at,
         (SELECT COUNT(*)::int FROM public.pets WHERE client_id = c.id) AS pets_count
-       FROM public.clients c WHERE c.company_id = $1 ORDER BY c.name`,
-      [cid]
+       FROM public.clients c
+       WHERE c.company_id = $1
+         AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' OR COALESCE(c.email, '') ILIKE '%' || $2 || '%')
+       ORDER BY c.name ${order}
+       LIMIT $3 OFFSET $4`,
+      [cid, q, limit, offset]
     );
     const clients = rows.map((r: Record<string, unknown>) => ({
       id: r.id,
@@ -126,12 +142,16 @@ export async function getPets(req: AuthReq, res: Response) {
   try {
     const cid = companyId(req);
     if (!cid) return res.json([]);
+    const { limit, offset, q, order } = listParams(req);
     const { rows } = await pool.query(
       `SELECT p.id, p.client_id, p.name, p.species, p.breed, p.birth_date, c.name AS owner_name, p.created_at
        FROM public.pets p
        JOIN public.clients c ON c.id = p.client_id
-       WHERE p.company_id = $1 ORDER BY p.name`,
-      [cid]
+       WHERE p.company_id = $1
+         AND ($2 = '' OR p.name ILIKE '%' || $2 || '%' OR c.name ILIKE '%' || $2 || '%')
+       ORDER BY p.name ${order}
+       LIMIT $3 OFFSET $4`,
+      [cid, q, limit, offset]
     );
     const pets = rows.map((r: Record<string, unknown>) => ({
       id: r.id,
@@ -156,9 +176,15 @@ export async function getServices(req: AuthReq, res: Response) {
   try {
     const cid = companyId(req);
     if (!cid) return res.json([]);
+    const { limit, offset, q, order } = listParams(req);
     const { rows } = await pool.query(
-      `SELECT id, name, category, duration_minutes, price, commission_pct FROM public.services WHERE company_id = $1 ORDER BY name`,
-      [cid]
+      `SELECT id, name, category, duration_minutes, price, commission_pct
+       FROM public.services
+       WHERE company_id = $1
+         AND ($2 = '' OR name ILIKE '%' || $2 || '%' OR category ILIKE '%' || $2 || '%')
+       ORDER BY name ${order}
+       LIMIT $3 OFFSET $4`,
+      [cid, q, limit, offset]
     );
     const services = rows.map((r: Record<string, unknown>) => ({
       id: r.id,
@@ -179,9 +205,15 @@ export async function getProducts(req: AuthReq, res: Response) {
   try {
     const cid = companyId(req);
     if (!cid) return res.json([]);
+    const { limit, offset, q, order } = listParams(req);
     const { rows } = await pool.query(
-      `SELECT id, name, category, stock, min_stock, price FROM public.products WHERE company_id = $1 ORDER BY name`,
-      [cid]
+      `SELECT id, name, category, stock, min_stock, price
+       FROM public.products
+       WHERE company_id = $1
+         AND ($2 = '' OR name ILIKE '%' || $2 || '%' OR category ILIKE '%' || $2 || '%')
+       ORDER BY name ${order}
+       LIMIT $3 OFFSET $4`,
+      [cid, q, limit, offset]
     );
     const products = rows.map((r: Record<string, unknown>) => {
       const stock = Number(r.stock);
@@ -210,6 +242,8 @@ export async function getAppointments(req: AuthReq, res: Response) {
   try {
     const cid = companyId(req);
     if (!cid) return res.json([]);
+    const { limit, offset, q, order } = listParams(req);
+    const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
     const { rows } = await pool.query(
       `SELECT a.id, a.client_id, a.pet_id, a.service_id, a.scheduled_at, a.duration_minutes, a.status, a.vet_name,
         c.name AS client_name, p.name AS pet_name, p.species AS pet_species, s.name AS service_name
@@ -217,9 +251,13 @@ export async function getAppointments(req: AuthReq, res: Response) {
        JOIN public.clients c ON c.id = a.client_id
        JOIN public.pets p ON p.id = a.pet_id
        JOIN public.services s ON s.id = a.service_id
-       WHERE a.company_id = $1 AND a.scheduled_at::date >= CURRENT_DATE
-       ORDER BY a.scheduled_at`,
-      [cid]
+       WHERE a.company_id = $1
+         AND a.scheduled_at::date >= CURRENT_DATE
+         AND ($2 = '' OR a.status::text = $2)
+         AND ($3 = '' OR c.name ILIKE '%' || $3 || '%' OR p.name ILIKE '%' || $3 || '%' OR s.name ILIKE '%' || $3 || '%')
+       ORDER BY a.scheduled_at ${order}
+       LIMIT $4 OFFSET $5`,
+      [cid, status, q, limit, offset]
     );
     const appointments = rows.map((r: Record<string, unknown>) => ({
       id: r.id,
@@ -245,13 +283,17 @@ export async function getAppointments(req: AuthReq, res: Response) {
 
 export async function getCompanies(req: AuthReq, res: Response) {
   try {
+    const { limit, offset, q, order } = listParams(req);
     if (req.isSuperAdmin) {
       const { rows } = await pool.query(
         `SELECT c.id, c.name, c.status, c.created_at, c.current_plan_id, p.name AS plan_name,
           (SELECT COUNT(*)::int FROM public.profiles WHERE company_id = c.id) AS users_count
          FROM public.companies c
          LEFT JOIN public.plans p ON p.id = c.current_plan_id
-         ORDER BY c.name`
+         WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%')
+         ORDER BY c.name ${order}
+         LIMIT $2 OFFSET $3`,
+        [q, limit, offset]
       );
       const companies = rows.map((r: Record<string, unknown>) => ({
         id: r.id,
@@ -296,10 +338,31 @@ export async function getTransactions(req: AuthReq, res: Response) {
     const cid = companyId(req);
     if (!cid) return res.json({ revenues: [], expenses: [], stats: [] });
     const type = (req.query.type as string) || 'all';
+    const { limit, offset, q } = listParams(req);
 
     const [revenues, expenses, totals] = await Promise.all([
-      type === 'expense' ? { rows: [] } : pool.query("SELECT id, date, description, value, status FROM public.transactions WHERE company_id = $1 AND type = 'revenue' ORDER BY date DESC", [cid]),
-      type === 'revenue' ? { rows: [] } : pool.query("SELECT id, date, description, category, value FROM public.transactions WHERE company_id = $1 AND type = 'expense' ORDER BY date DESC", [cid]),
+      type === 'expense'
+        ? { rows: [] }
+        : pool.query(
+            `SELECT id, date, description, value, status
+             FROM public.transactions
+             WHERE company_id = $1 AND type = 'revenue'
+               AND ($2 = '' OR description ILIKE '%' || $2 || '%')
+             ORDER BY date DESC
+             LIMIT $3 OFFSET $4`,
+            [cid, q, limit, offset]
+          ),
+      type === 'revenue'
+        ? { rows: [] }
+        : pool.query(
+            `SELECT id, date, description, category, value
+             FROM public.transactions
+             WHERE company_id = $1 AND type = 'expense'
+               AND ($2 = '' OR description ILIKE '%' || $2 || '%' OR COALESCE(category, '') ILIKE '%' || $2 || '%')
+             ORDER BY date DESC
+             LIMIT $3 OFFSET $4`,
+            [cid, q, limit, offset]
+          ),
       pool.query(
         `SELECT
           COALESCE(SUM(CASE WHEN type = 'revenue' THEN value ELSE 0 END),0)::float AS rev,
@@ -757,6 +820,115 @@ export async function exportCompanies(req: AuthReq, res: Response) {
   } catch (e) {
     console.error('exportCompanies:', e);
     res.status(500).json({ error: 'Erro ao exportar empresas.' });
+  }
+}
+
+export async function getAdminMetrics(req: AuthReq, res: Response) {
+  try {
+    if (!req.isSuperAdmin) return res.status(403).json({ error: 'Acesso restrito a superadmin.' });
+    const monthStart = "date_trunc('month', CURRENT_DATE)::date";
+    const prevMonthStart = "date_trunc('month', CURRENT_DATE - interval '1 month')::date";
+    const prevMonthEnd = "(date_trunc('month', CURRENT_DATE) - interval '1 day')::date";
+
+    const [
+      totalCompanies,
+      activeCompanies,
+      trialCompanies,
+      pastDueCompanies,
+      cancelledCompanies,
+      newCompanies30d,
+      totalUsers,
+      mrr,
+      revenueMonth,
+      revenuePrevMonth,
+      companiesByStatus,
+      companiesByMonth,
+      revenueByMonth,
+    ] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS c FROM public.companies`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM public.companies WHERE status = 'active'`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM public.companies WHERE status = 'trial'`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM public.companies WHERE status = 'past_due'`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM public.companies WHERE status = 'cancelled'`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM public.companies WHERE created_at >= (CURRENT_DATE - interval '30 days')`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM public.profiles`),
+      pool.query(
+        `SELECT COALESCE(SUM(p.price),0)::float AS total
+         FROM public.companies c
+         LEFT JOIN public.plans p ON p.id = c.current_plan_id
+         WHERE c.status = 'active'`
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(value),0)::float AS total
+         FROM public.transactions
+         WHERE type = 'revenue' AND date >= ${monthStart}`
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(value),0)::float AS total
+         FROM public.transactions
+         WHERE type = 'revenue' AND date BETWEEN ${prevMonthStart} AND ${prevMonthEnd}`
+      ),
+      pool.query(
+        `SELECT status, COUNT(*)::int AS c
+         FROM public.companies
+         GROUP BY status
+         ORDER BY status`
+      ),
+      pool.query(
+        `SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*)::int AS c
+         FROM public.companies
+         WHERE created_at >= date_trunc('month', CURRENT_DATE) - interval '5 months'
+         GROUP BY 1
+         ORDER BY 1`
+      ),
+      pool.query(
+        `SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS month, COALESCE(SUM(value),0)::float AS total
+         FROM public.transactions
+         WHERE type = 'revenue' AND date >= date_trunc('month', CURRENT_DATE) - interval '5 months'
+         GROUP BY 1
+         ORDER BY 1`
+      ),
+    ]);
+
+    const active = activeCompanies.rows[0]?.c ?? 0;
+    const mrrTotal = Number(mrr.rows[0]?.total ?? 0);
+    const revNow = Number(revenueMonth.rows[0]?.total ?? 0);
+    const revPrev = Number(revenuePrevMonth.rows[0]?.total ?? 0);
+    const revChange = revPrev === 0 ? 0 : ((revNow - revPrev) / revPrev) * 100;
+    const arpu = active > 0 ? mrrTotal / active : 0;
+
+    res.json({
+      stats: {
+        total_companies: totalCompanies.rows[0]?.c ?? 0,
+        active_companies: active,
+        trial_companies: trialCompanies.rows[0]?.c ?? 0,
+        past_due_companies: pastDueCompanies.rows[0]?.c ?? 0,
+        cancelled_companies: cancelledCompanies.rows[0]?.c ?? 0,
+        new_companies_30d: newCompanies30d.rows[0]?.c ?? 0,
+        total_users: totalUsers.rows[0]?.c ?? 0,
+        mrr: mrrTotal,
+        arpu,
+        revenue_month: revNow,
+        revenue_change_pct: revChange,
+      },
+      charts: {
+        companies_by_status: companiesByStatus.rows.map((r: { status: string; c: number }) => ({
+          status: r.status,
+          count: r.c,
+        })),
+        companies_by_month: companiesByMonth.rows.map((r: { month: string; c: number }) => ({
+          month: r.month,
+          value: r.c,
+        })),
+        revenue_by_month: revenueByMonth.rows.map((r: { month: string; total: number }) => ({
+          month: r.month,
+          value: Number(r.total),
+        })),
+      },
+    });
+  } catch (e) {
+    console.error('getAdminMetrics:', e);
+    res.status(500).json({ error: 'Erro ao carregar métricas.' });
   }
 }
 

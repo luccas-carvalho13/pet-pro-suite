@@ -6,6 +6,7 @@ import * as api from './routes/api.js';
 import { logger, logFilePath, getLogLines } from './logger.js';
 import { loginRateLimit } from './rate-limit.js';
 import { pathToFileURL } from 'url';
+import { getMetricsSnapshot, observabilityMiddleware } from './observability.js';
 
 const port = Number(process.env.PORT) || 3001;
 
@@ -14,16 +15,7 @@ export function createApp() {
 
   app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
-
-  // Log de todas as requisições e do status da resposta (console + arquivo)
-  app.use((req, res, next) => {
-    const start = Date.now();
-    res.on('finish', () => {
-      const line = `${req.method} ${req.path} → ${res.statusCode} (${Date.now() - start}ms)`;
-      logger.info(line);
-    });
-    next();
-  });
+  app.use(observabilityMiddleware);
 
   app.post('/auth/login', loginRateLimit, login);
   app.post('/auth/register', register);
@@ -70,14 +62,16 @@ export function createApp() {
   app.get('/api/settings/users', requireAuth, requireCompany, api.getCompanyUsers);
   app.put('/api/settings/users/:id', requireAuth, requireCompany, api.updateCompanyUserRole);
   app.get('/api/reports/export', requireAuth, requireCompany, api.exportReport);
-  app.get('/api/admin/plans', requireAuth, api.getPlans);
-  app.put('/api/admin/plans/:id', requireAuth, api.updatePlan);
-  app.post('/api/admin/companies', requireAuth, api.createCompany);
-  app.put('/api/admin/companies/:id', requireAuth, api.updateCompany);
-  app.get('/api/admin/export/companies', requireAuth, api.exportCompanies);
+app.get('/api/admin/plans', requireAuth, api.getPlans);
+app.put('/api/admin/plans/:id', requireAuth, api.updatePlan);
+app.post('/api/admin/companies', requireAuth, api.createCompany);
+app.put('/api/admin/companies/:id', requireAuth, api.updateCompany);
+app.get('/api/admin/export/companies', requireAuth, api.exportCompanies);
+app.get('/api/admin/metrics', requireAuth, api.getAdminMetrics);
   app.post('/api/invite', requireAuth, requireAdmin, invite);
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
+  app.get('/metrics', requireAuth, requireAdmin, (_req, res) => res.json(getMetricsSnapshot()));
   return app;
 }
 
