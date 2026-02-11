@@ -1,270 +1,126 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { PawPrint, Send, Sparkles, Dog, Cat } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { PawPrint, Dog, Cat, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { signUp, checkEmailAvailable } from "@/lib/api";
+import { checkEmailAvailable, signUp } from "@/lib/api";
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const phoneSchema = z
+  .string()
+  .min(8, "Telefone é obrigatório.")
+  .refine((value) => {
+    const digits = value.replace(/\D/g, "");
+    return digits.length >= 10 && digits.length <= 13;
+  }, "Telefone inválido.");
 
-type RegisterStep = "company" | "cnpj" | "company_phone" | "address" | "name" | "user_phone" | "email" | "password";
-type ChatMessage = { role: "assistant" | "user"; content: string };
+const registerSchema = z
+  .object({
+    company_name: z.string().min(2, "Nome da empresa é obrigatório."),
+    company_cnpj: z
+      .string()
+      .optional()
+      .refine((value) => {
+        if (!value) return true;
+        const digits = value.replace(/\D/g, "");
+        return digits.length === 14;
+      }, "CNPJ inválido."),
+    company_phone: phoneSchema,
+    company_address: z.string().optional(),
+    full_name: z.string().min(2, "Seu nome é obrigatório."),
+    user_phone: phoneSchema,
+    email: z.string().email("Informe um e-mail válido."),
+    password: z.string().min(6, "A senha deve ter no mínimo 6 caracteres."),
+    confirm_password: z.string().min(6, "Confirme sua senha."),
+  })
+  .refine((data) => data.password === data.confirm_password, {
+    path: ["confirm_password"],
+    message: "As senhas não conferem.",
+  });
 
-const REGISTER_PROMPTS: Record<RegisterStep, string> = {
-  company: "Qual o nome da sua empresa ou clínica? 🏢",
-  cnpj: "Informe o CNPJ da empresa (apenas números ou com pontuação) 📋",
-  company_phone: "Qual o telefone da empresa? 📞",
-  address: "Endereço completo (rua, número, bairro, cidade). Pode pular digitando - 📍",
-  name: "Agora informe seu nome (responsável pela empresa) ✨",
-  user_phone: "Qual seu telefone (do responsável)? 📱",
-  email: "Informe seu melhor e-mail 📧",
-  password: "Por último, crie uma senha segura (mín. 6 caracteres) 🔐",
-};
-
-const TYPING_DELAY_MS = 700;
+type RegisterForm = z.infer<typeof registerSchema>;
 
 const Register = () => {
   const navigate = useNavigate();
-  const scrollBottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const [registerStep, setRegisterStep] = useState<RegisterStep>("company");
-  const [registerChatHistory, setRegisterChatHistory] = useState<ChatMessage[]>([
-    { role: "assistant", content: "Cadastre sua empresa e sua conta" },
-    { role: "assistant", content: REGISTER_PROMPTS.company },
-  ]);
-  const [isTyping, setIsTyping] = useState(false);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [companyName, setCompanyName] = useState("");
-  const [cnpj, setCnpj] = useState("");
-  const [companyPhone, setCompanyPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [name, setName] = useState("");
-  const [userPhone, setUserPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [registerPayload, setRegisterPayload] = useState<{
-    company_name: string;
-    company_cnpj: string;
-    company_phone: string;
-    company_address: string;
-    full_name: string;
-    user_phone: string;
-    email: string;
-  }>({
-    company_name: "",
-    company_cnpj: "",
-    company_phone: "",
-    company_address: "",
-    full_name: "",
-    user_phone: "",
-    email: "",
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors },
+  } = useForm<RegisterForm>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      company_name: "",
+      company_cnpj: "",
+      company_phone: "",
+      company_address: "",
+      full_name: "",
+      user_phone: "",
+      email: "",
+      password: "",
+      confirm_password: "",
+    },
   });
-  const [fieldError, setFieldError] = useState<string>("");
-  const [checkingEmail, setCheckingEmail] = useState(false);
 
-  useEffect(() => {
-    scrollBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [registerChatHistory, isTyping, registerStep]);
-
-  useEffect(() => {
-    if (!isTyping) {
-      const t = setTimeout(() => inputRef.current?.focus(), 100);
-      return () => clearTimeout(t);
-    }
-  }, [registerStep, isTyping]);
-
-  const pushUserAndNextAssistant = (
-    userContent: string,
-    nextPrompt: string,
-    nextStep: RegisterStep
-  ) => {
-    setFieldError("");
-    if (nextStep === "cnpj") setRegisterPayload((p) => ({ ...p, company_name: userContent }));
-    if (nextStep === "company_phone") setRegisterPayload((p) => ({ ...p, company_cnpj: userContent }));
-    if (nextStep === "address") setRegisterPayload((p) => ({ ...p, company_phone: userContent }));
-    if (nextStep === "name") setRegisterPayload((p) => ({ ...p, company_address: userContent === "-" ? "" : userContent }));
-    if (nextStep === "user_phone") setRegisterPayload((p) => ({ ...p, full_name: userContent }));
-    if (nextStep === "email") setRegisterPayload((p) => ({ ...p, user_phone: userContent }));
-    if (nextStep === "password") setRegisterPayload((p) => ({ ...p, email: userContent }));
-    setRegisterChatHistory((h) => [...h, { role: "user", content: userContent === "-" ? "Pular" : userContent }]);
-    setCompanyName("");
-    setCnpj("");
-    setCompanyPhone("");
-    setAddress("");
-    setName("");
-    setUserPhone("");
-    setEmail("");
-    setPassword("");
-    setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
-      setRegisterChatHistory((h) => [...h, { role: "assistant", content: nextPrompt }]);
-      setRegisterStep(nextStep);
-    }, TYPING_DELAY_MS);
-  };
-
-  const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setFieldError("");
-
-    if (registerStep === "company") {
-      const v = companyName.trim();
-      if (!v) {
-        setFieldError("Informe o nome da empresa.");
-        return;
-      }
-      if (v.length < 2) {
-        setFieldError("Nome da empresa deve ter pelo menos 2 caracteres.");
-        return;
-      }
-      pushUserAndNextAssistant(v, REGISTER_PROMPTS.cnpj, "cnpj");
-      return;
-    }
-    if (registerStep === "cnpj" && cnpj.trim()) {
-      pushUserAndNextAssistant(cnpj.trim(), REGISTER_PROMPTS.company_phone, "company_phone");
-      return;
-    }
-    if (registerStep === "company_phone") {
-      const v = companyPhone.trim();
-      if (!v) {
-        setFieldError("Informe o telefone da empresa.");
-        return;
-      }
-      pushUserAndNextAssistant(v, REGISTER_PROMPTS.address, "address");
-      return;
-    }
-    if (registerStep === "address") {
-      const val = address.trim() || "-";
-      pushUserAndNextAssistant(val, REGISTER_PROMPTS.name, "name");
-      return;
-    }
-    if (registerStep === "name") {
-      const v = name.trim();
-      if (!v) {
-        setFieldError("Informe seu nome.");
-        return;
-      }
-      if (v.length < 2) {
-        setFieldError("Nome deve ter pelo menos 2 caracteres.");
-        return;
-      }
-      pushUserAndNextAssistant(v, REGISTER_PROMPTS.user_phone, "user_phone");
-      return;
-    }
-    if (registerStep === "user_phone") {
-      const v = userPhone.trim();
-      if (!v) {
-        setFieldError("Informe seu telefone.");
-        return;
-      }
-      pushUserAndNextAssistant(v, REGISTER_PROMPTS.email, "email");
-      return;
-    }
-    if (registerStep === "email") {
-      const v = email.trim().toLowerCase();
-      if (!v) {
-        setFieldError("Informe seu e-mail.");
-        return;
-      }
-      if (!EMAIL_REGEX.test(v)) {
-        setFieldError("Digite um e-mail válido (ex: seu@email.com).");
-        return;
-      }
-      setCheckingEmail(true);
-      try {
-        const available = await checkEmailAvailable(v);
-        if (!available) {
-          setFieldError("Este e-mail já está em uso. Digite outro.");
-          return;
-        }
-        pushUserAndNextAssistant(v, REGISTER_PROMPTS.password, "password");
-      } finally {
-        setCheckingEmail(false);
-      }
-      return;
-    }
-    if (registerStep === "password") {
-      if (!password) {
-        setFieldError("Crie uma senha.");
-        return;
-      }
-      if (password.length < 6) {
-        setFieldError("A senha deve ter no mínimo 6 caracteres.");
-        return;
-      }
-      if (!registerPayload.email.trim()) {
-        setFieldError("E-mail inválido.");
-        return;
-      }
-      if (!registerPayload.full_name.trim()) {
-        setFieldError("Nome inválido.");
-        return;
-      }
-      if (!registerPayload.company_name.trim()) {
-        setFieldError("Nome da empresa inválido.");
-        return;
-      }
-      setIsCreatingAccount(true);
-      setRegisterChatHistory((h) => [...h, { role: "user", content: "••••••••" }]);
-      setIsTyping(true);
-      setTimeout(() => {
-        setIsTyping(false);
-        setRegisterChatHistory((h) => [
-          ...h,
-          { role: "assistant", content: "Perfeito! Criando sua empresa e conta... ✨" },
-        ]);
-      }, TYPING_DELAY_MS);
-      setIsLoading(true);
-      setFieldError("");
-      try {
-        await signUp({
-          company_name: registerPayload.company_name.trim(),
-          company_cnpj: registerPayload.company_cnpj.trim(),
-          company_phone: registerPayload.company_phone.trim(),
-          company_address: registerPayload.company_address.trim(),
-          full_name: registerPayload.full_name.trim(),
-          user_phone: registerPayload.user_phone.trim(),
-          email: registerPayload.email.trim(),
-          password,
-        });
-        toast.success("Empresa e conta criadas com sucesso!");
-        navigate("/dashboard");
-      } catch (err: unknown) {
-        const msg =
-          err && typeof err === "object" && "message" in err
-            ? String((err as { message: string }).message)
-            : "Erro ao criar conta.";
-        const isEmailInUse = /já está em uso|em uso|already in use/i.test(msg);
-        if (isEmailInUse) {
-          setRegisterStep("email");
-          setEmail(registerPayload.email.trim());
-          setFieldError("Este e-mail já está em uso. Digite outro e-mail.");
-          setRegisterChatHistory((h) => [
-            ...h.slice(0, -2),
-            { role: "assistant", content: "Este e-mail já está em uso. Por favor, informe outro e-mail. 📧" },
-          ]);
-          toast.error("E-mail já em uso. Digite outro e-mail.");
-        } else {
-          toast.error(msg);
-        }
-      } finally {
+  const onSubmit = async (values: RegisterForm) => {
+    setIsLoading(true);
+    try {
+      const available = await checkEmailAvailable(values.email);
+      if (!available) {
+        setError("email", { message: "Este e-mail já está em uso." });
         setIsLoading(false);
-        setIsCreatingAccount(false);
+        return;
       }
+      await signUp({
+        company_name: values.company_name.trim(),
+        company_cnpj: values.company_cnpj?.trim() ?? "",
+        company_phone: values.company_phone.trim(),
+        company_address: values.company_address?.trim() ?? "",
+        full_name: values.full_name.trim(),
+        user_phone: values.user_phone.trim(),
+        email: values.email.trim().toLowerCase(),
+        password: values.password,
+      });
+      toast.success("Empresa e conta criadas com sucesso!");
+      navigate("/dashboard");
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: string }).message)
+          : "Erro ao criar conta.";
+      const field =
+        err && typeof err === "object" && "field" in err ? String((err as { field?: string }).field ?? "") : "";
+      const validFields: Array<keyof RegisterForm> = [
+        "company_name",
+        "company_cnpj",
+        "company_phone",
+        "company_address",
+        "full_name",
+        "user_phone",
+        "email",
+        "password",
+        "confirm_password",
+      ];
+      if (field && validFields.includes(field as keyof RegisterForm)) {
+        setError(field as keyof RegisterForm, { message: msg });
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="h-screen flex overflow-hidden bg-hero">
-      {/* Painel esquerdo */}
+    <div className="min-h-screen flex">
       <div className="hidden lg:flex lg:w-[45%] xl:w-[50%] bg-primary text-primary-foreground flex-col relative overflow-hidden shrink-0">
         <div className="absolute inset-0 bg-grid opacity-20" />
-        <div className="relative z-10 p-8 flex flex-col h-full">
+        <div className="relative z-10 p-8 flex flex-col min-h-screen">
           <Link to="/" className="flex items-center gap-2">
             <div className="h-9 w-9 rounded-lg bg-white/20 flex items-center justify-center">
               <PawPrint className="h-5 w-5 text-white" />
@@ -297,282 +153,108 @@ const Register = () => {
         </div>
       </div>
 
-      {/* Painel direito - chat de cadastro: scroll só na área do chat */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <div className="flex flex-col h-full max-w-lg w-full mx-auto px-6 py-6 overflow-hidden rounded-2xl border border-border/60 bg-card/80 shadow-lg backdrop-blur">
-          <div className="flex items-center gap-3 mb-4 shrink-0">
-            <Avatar className="h-12 w-12 border-2 border-primary/20 shrink-0">
-              <AvatarFallback className="bg-primary/10 text-primary text-lg">
-                <PawPrint className="h-6 w-6" />
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <p className="font-semibold text-foreground">Pet Pro Assistente</p>
-              <p className="text-sm text-muted-foreground">Criação de conta</p>
-            </div>
+      <div className="flex-1 flex flex-col bg-background min-h-screen justify-center">
+        <div className="w-full max-w-2xl mx-auto px-6 py-10">
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold">Criar conta</h1>
+            <p className="text-muted-foreground mt-1">Preencha os dados da empresa e do responsável.</p>
           </div>
 
-          <ScrollArea className="flex-1 min-h-0 pr-2 -mr-2">
-            <div className="space-y-4 pb-4">
-              {registerChatHistory.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}
-                >
-                  {msg.role === "assistant" ? (
-                    <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm text-foreground max-w-[85%]">
-                      {msg.content}
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-4 py-3 text-sm max-w-[85%]">
-                      {msg.content}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {isTyping && (
-                <div className="flex gap-3">
-                  <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-3 flex gap-1.5 items-center min-h-[2.75rem]">
-                    <span className="typing-dot w-2 h-2 rounded-full bg-muted-foreground/70" />
-                    <span className="typing-dot w-2 h-2 rounded-full bg-muted-foreground/70" />
-                    <span className="typing-dot w-2 h-2 rounded-full bg-muted-foreground/70" />
-                  </div>
-                </div>
-              )}
-            </div>
-            <div ref={scrollBottomRef} />
-          </ScrollArea>
-
-          <div
-            key={registerStep}
-            className="pt-4 space-y-2 flex-shrink-0"
-          >
-            {!isCreatingAccount && (
-              <form onSubmit={handleRegister} className="space-y-4">
-                {registerStep === "company" && (
-                  <div className="space-y-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        ref={inputRef}
-                        type="text"
-                        placeholder="Ex: Clínica Pet Feliz"
-                        value={companyName}
-                        onChange={(e) => { setCompanyName(e.target.value); setFieldError(""); }}
-                        className={`flex-1 h-11 ${fieldError ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                      />
-                      <Button
-                        type="submit"
-                        size="icon"
-                        className="h-11 w-11 shrink-0 bg-primary hover:bg-primary/90"
-                        disabled={!companyName.trim()}
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {fieldError && <p className="text-sm text-destructive">{fieldError}</p>}
-                  </div>
-                )}
-                {registerStep === "cnpj" && (
-                  <div className="space-y-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        ref={inputRef}
-                        type="text"
-                        placeholder="00.000.000/0001-00 ou apenas números"
-                        value={cnpj}
-                        onChange={(e) => { setCnpj(e.target.value); setFieldError(""); }}
-                        className={`flex-1 h-11 ${fieldError ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                      />
-                      <Button
-                        type="submit"
-                        size="icon"
-                        className="h-11 w-11 shrink-0 bg-primary hover:bg-primary/90"
-                        disabled={!cnpj.trim()}
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {fieldError && <p className="text-sm text-destructive">{fieldError}</p>}
-                  </div>
-                )}
-                {registerStep === "company_phone" && (
-                  <div className="space-y-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        ref={inputRef}
-                        type="tel"
-                        placeholder="Telefone da empresa — (11) 3456-7890"
-                        value={companyPhone}
-                        onChange={(e) => { setCompanyPhone(e.target.value); setFieldError(""); }}
-                        className={`flex-1 h-11 ${fieldError ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                      />
-                      <Button
-                        type="submit"
-                        size="icon"
-                        className="h-11 w-11 shrink-0 bg-primary hover:bg-primary/90"
-                        disabled={!companyPhone.trim()}
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {fieldError && <p className="text-sm text-destructive">{fieldError}</p>}
-                  </div>
-                )}
-                {registerStep === "user_phone" && (
-                  <div className="space-y-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        ref={inputRef}
-                        type="tel"
-                        placeholder="Seu telefone — (11) 98765-4321"
-                        value={userPhone}
-                        onChange={(e) => { setUserPhone(e.target.value); setFieldError(""); }}
-                        className={`flex-1 h-11 ${fieldError ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                      />
-                      <Button
-                        type="submit"
-                        size="icon"
-                        className="h-11 w-11 shrink-0 bg-primary hover:bg-primary/90"
-                        disabled={!userPhone.trim()}
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {fieldError && <p className="text-sm text-destructive">{fieldError}</p>}
-                  </div>
-                )}
-                {registerStep === "address" && (
-                  <div className="space-y-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        ref={inputRef}
-                        type="text"
-                        placeholder="Rua, número, bairro, cidade. Ou - para pular"
-                        value={address}
-                        onChange={(e) => { setAddress(e.target.value); setFieldError(""); }}
-                        className="flex-1 h-11"
-                      />
-                      <Button
-                        type="submit"
-                        size="icon"
-                        className="h-11 w-11 shrink-0 bg-primary hover:bg-primary/90"
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {fieldError && <p className="text-sm text-destructive">{fieldError}</p>}
-                  </div>
-                )}
-                {registerStep === "name" && (
-                  <div className="space-y-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        ref={inputRef}
-                        type="text"
-                        placeholder="Digite seu nome"
-                        value={name}
-                        onChange={(e) => { setName(e.target.value); setFieldError(""); }}
-                        className={`flex-1 h-11 ${fieldError ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                      />
-                      <Button
-                        type="submit"
-                        size="icon"
-                        className="h-11 w-11 shrink-0 bg-primary hover:bg-primary/90"
-                        disabled={!name.trim()}
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {fieldError && <p className="text-sm text-destructive">{fieldError}</p>}
-                  </div>
-                )}
-                {registerStep === "email" && (
-                  <div className="space-y-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        ref={inputRef}
-                        type="email"
-                        placeholder="Digite seu e-mail (ex: seu@email.com)"
-                        value={email}
-                        onChange={(e) => { setEmail(e.target.value); setFieldError(""); }}
-                        className={`flex-1 h-11 ${fieldError ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                      />
-                      <Button
-                        type="submit"
-                        size="icon"
-                        className="h-11 w-11 shrink-0 bg-primary hover:bg-primary/90"
-                        disabled={!email.trim() || checkingEmail}
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {fieldError && <p className="text-sm text-destructive">{fieldError}</p>}
-                  </div>
-                )}
-                {registerStep === "password" && (
-                  <div className="space-y-2">
-                    <div className="space-y-1.5">
-                      <div className="flex gap-2">
-                        <Input
-                          ref={inputRef}
-                          type="password"
-                          placeholder="Mín. 6 caracteres"
-                          value={password}
-                          onChange={(e) => { setPassword(e.target.value); setFieldError(""); }}
-                          className={`flex-1 h-11 ${fieldError ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                        />
-                        <Button
-                          type="submit"
-                          size="icon"
-                          className="h-11 w-11 shrink-0 bg-primary hover:bg-primary/90"
-                          disabled={isLoading}
-                        >
-                          <Send className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {fieldError && <p className="text-sm text-destructive">{fieldError}</p>}
-                      {password.length > 0 && password.length < 6 && (
-                        <p className="text-xs text-muted-foreground">Faltam {6 - password.length} caracteres (mín. 6)</p>
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="text-muted-foreground text-sm h-auto py-1 hover:bg-muted hover:text-foreground"
-                      onClick={() => { setRegisterStep("email"); setFieldError(""); }}
-                    >
-                      Voltar
-                    </Button>
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Ao criar uma conta você concorda com nossos{" "}
-                  <Link to="#" className="text-primary hover:underline underline-offset-2">
-                    Termos de Uso
-                  </Link>{" "}
-                  e{" "}
-                  <Link to="#" className="text-primary hover:underline underline-offset-2">
-                    Política de Privacidade
-                  </Link>
-                  .
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Já tem conta?{" "}
-                  <Link to="/login" className="text-primary font-medium hover:underline">
-                    Entrar
-                  </Link>
-                </p>
-                <Link to="/" className="block text-sm text-muted-foreground hover:text-foreground mt-2">
-                  ← Voltar ao início
-                </Link>
-              </form>
-            )}
-            {isCreatingAccount && (
-              <div className="py-3 text-center text-sm text-muted-foreground">
-                Criando sua conta...
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="company_name">Nome da empresa</Label>
+                <Input id="company_name" {...register("company_name")} />
+                {errors.company_name && <p className="text-sm text-destructive">{errors.company_name.message}</p>}
               </div>
-            )}
-          </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="company_cnpj">CNPJ</Label>
+                <Input
+                  id="company_cnpj"
+                  inputMode="numeric"
+                  placeholder="00.000.000/0000-00"
+                  {...register("company_cnpj")}
+                />
+                {errors.company_cnpj && <p className="text-sm text-destructive">{errors.company_cnpj.message}</p>}
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="company_phone">Telefone da empresa</Label>
+                <Input
+                  id="company_phone"
+                  type="tel"
+                  inputMode="tel"
+                  placeholder="(11) 99999-9999"
+                  {...register("company_phone")}
+                />
+                {errors.company_phone && <p className="text-sm text-destructive">{errors.company_phone.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="company_address">Endereço</Label>
+                <Input id="company_address" {...register("company_address")} />
+                {errors.company_address && <p className="text-sm text-destructive">{errors.company_address.message}</p>}
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="full_name">Seu nome</Label>
+                <Input id="full_name" {...register("full_name")} />
+                {errors.full_name && <p className="text-sm text-destructive">{errors.full_name.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="user_phone">Seu telefone</Label>
+                <Input
+                  id="user_phone"
+                  type="tel"
+                  inputMode="tel"
+                  placeholder="(11) 99999-9999"
+                  {...register("user_phone")}
+                />
+                {errors.user_phone && <p className="text-sm text-destructive">{errors.user_phone.message}</p>}
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="email">E-mail</Label>
+                <Input id="email" type="email" {...register("email")} />
+                {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="password">Senha</Label>
+                <Input id="password" type="password" {...register("password")} />
+                {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="confirm_password">Confirmar senha</Label>
+              <Input id="confirm_password" type="password" {...register("confirm_password")} />
+              {errors.confirm_password && <p className="text-sm text-destructive">{errors.confirm_password.message}</p>}
+            </div>
+
+            <Button type="submit" className="w-full h-11" disabled={isLoading}>
+              {isLoading ? "Criando..." : "Criar conta"}
+            </Button>
+          </form>
+
+          <p className="text-center text-sm text-muted-foreground mt-6">
+            Já tem conta?{" "}
+            <Link to="/login" className="text-primary font-medium hover:underline">
+              Entrar
+            </Link>
+          </p>
+          <p className="text-center mt-4 flex items-center justify-center gap-4">
+            <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">
+              ← Voltar ao início
+            </Link>
+            <Link to="/logs" className="text-sm text-muted-foreground hover:text-foreground">
+              Ver logs
+            </Link>
+          </p>
         </div>
       </div>
     </div>

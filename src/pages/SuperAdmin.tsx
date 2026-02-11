@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { SuperAdminLayout } from "@/components/SuperAdminLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Building2, Users, DollarSign, TrendingUp, Search, Lock, CheckCircle2, AlertTriangle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
-import { createCompany, exportCompanies, getCompanies, getPlans, updateCompany, updatePlan, type CompanyListItem, type Plan } from "@/lib/api";
+import { createCompany, exportCompanies, getAdminMetrics, getCompanies, getPlans, updateCompany, updatePlan, type CompanyListItem, type Plan } from "@/lib/api";
 import { toast } from "sonner";
 
 const SuperAdmin = () => {
@@ -42,6 +42,10 @@ const SuperAdmin = () => {
   const { data: companies = [], isLoading, error } = useQuery({
     queryKey: ["companies"],
     queryFn: getCompanies,
+  });
+  const { data: metrics } = useQuery({
+    queryKey: ["admin-metrics"],
+    queryFn: getAdminMetrics,
   });
   const { data: plans = [] } = useQuery({
     queryKey: ["plans"],
@@ -73,14 +77,14 @@ const SuperAdmin = () => {
   );
 
   const globalStats = [
-    { label: "Empresas Ativas", value: String(companies.filter((c: CompanyListItem) => c.status === "active" || c.status === "trial").length), icon: Building2, color: "text-primary", trend: "" },
-    { label: "Total de Usuários", value: String(companies.reduce((acc: number, c: CompanyListItem) => acc + (c.users ?? 0), 0)), icon: Users, color: "text-blue-500", trend: "" },
-    { label: "Faturamento MRR", value: "R$ 0", icon: DollarSign, color: "text-green-500", trend: "" },
-    { label: "Taxa de Crescimento", value: "–", icon: TrendingUp, color: "text-orange-500", trend: "" },
+    { label: "Empresas Ativas", value: String(metrics?.stats.active_companies ?? 0), icon: Building2, color: "text-primary", trend: "" },
+    { label: "Total de Usuários", value: String(metrics?.stats.total_users ?? 0), icon: Users, color: "text-primary", trend: "" },
+    { label: "MRR", value: `R$ ${(metrics?.stats.mrr ?? 0).toFixed(2)}`, icon: DollarSign, color: "text-primary", trend: "" },
+    { label: "Receita (Mês)", value: `R$ ${(metrics?.stats.revenue_month ?? 0).toFixed(2)}`, icon: TrendingUp, color: "text-primary", trend: "" },
   ];
 
-  const revenueData = companies.length ? [{ month: "Atual", value: 0 }] : [];
-  const companiesData = companies.length ? [{ month: "Atual", value: companies.length }] : [];
+  const revenueData = metrics?.charts.revenue_by_month ?? [];
+  const companiesData = metrics?.charts.companies_by_month ?? [];
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -107,61 +111,132 @@ const SuperAdmin = () => {
   };
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Super Admin Dashboard</h1>
-            <p className="text-muted-foreground">Gestão global da plataforma SaaS</p>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button
-              variant="outline"
-              className="w-full sm:w-auto"
-              onClick={async () => {
-                try {
-                  const blob = await exportCompanies();
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = "empresas.csv";
-                  a.click();
-                  URL.revokeObjectURL(url);
-                } catch {
-                  toast.error("Erro ao exportar empresas.");
-                }
-              }}
-            >
-              Exportar Dados
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              onClick={() => {
-                setEditingCompany(null);
-                setCompanyForm({ name: "", cnpj: "", phone: "", address: "", status: "trial", current_plan_id: "" });
-                setCompanyDialogOpen(true);
-              }}
-            >
-              Nova Empresa
-            </Button>
-          </div>
+    <SuperAdminLayout>
+      <div className="space-y-8">
+        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <Card>
+            <CardHeader className="space-y-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle className="text-3xl">Super Admin</CardTitle>
+                  <CardDescription>Visão global da operação SaaS</CardDescription>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={async () => {
+                      try {
+                        const blob = await exportCompanies();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = "empresas.csv";
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      } catch {
+                        toast.error("Erro ao exportar empresas.");
+                      }
+                    }}
+                  >
+                    Exportar Dados
+                  </Button>
+                  <Button
+                    className="w-full sm:w-auto"
+                    onClick={() => {
+                      setEditingCompany(null);
+                      setCompanyForm({ name: "", cnpj: "", phone: "", address: "", status: "trial", current_plan_id: "" });
+                      setCompanyDialogOpen(true);
+                    }}
+                  >
+                    Nova Empresa
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {globalStats.map((stat) => (
+                  <div key={stat.label} className="rounded-xl border bg-card p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">{stat.label}</p>
+                        <p className="mt-2 text-2xl font-semibold">{isLoading ? "–" : stat.value}</p>
+                      </div>
+                      <stat.icon className={`h-7 w-7 ${stat.color}`} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Resumo Operacional</CardTitle>
+              <CardDescription>Indicadores rápidos do mês</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Trials ativas</span>
+                <span className="font-medium">{metrics?.stats.trial_companies ?? 0}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Inadimplentes</span>
+                <span className="font-medium">{metrics?.stats.past_due_companies ?? 0}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Canceladas</span>
+                <span className="font-medium">{metrics?.stats.cancelled_companies ?? 0}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Novas (30d)</span>
+                <span className="font-medium">{metrics?.stats.new_companies_30d ?? 0}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">ARPU</span>
+                <span className="font-medium">R$ {(metrics?.stats.arpu ?? 0).toFixed(2)}</span>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-          {globalStats.map((stat) => (
-            <Card key={stat.label}>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className="text-2xl font-bold mt-1">{isLoading ? "–" : stat.value}</p>
-                    {stat.trend ? <p className="text-xs text-green-500 mt-1">{stat.trend}</p> : null}
-                  </div>
-                  <stat.icon className={`h-8 w-8 ${stat.color}`} />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Receita Recorrente (MRR)</CardTitle>
+              <CardDescription>Evolução nos últimos 6 meses</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={revenueData.length ? revenueData : [{ month: "–", value: 0 }]}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="month" className="text-sm" />
+                  <YAxis className="text-sm" />
+                  <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }} formatter={(value) => `R$ ${value}`} />
+                  <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={3} dot={{ fill: "hsl(var(--primary))", r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Crescimento de Empresas</CardTitle>
+              <CardDescription>Acompanhamento mensal</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={companiesData.length ? companiesData : [{ month: "–", value: 0 }]}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="month" className="text-sm" />
+                  <YAxis className="text-sm" />
+                  <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }} />
+                  <Bar dataKey="value" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
         </div>
 
         <Tabs defaultValue="companies" className="w-full">
@@ -295,16 +370,40 @@ const SuperAdmin = () => {
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="p-4 border rounded-lg">
-                    <p className="text-sm text-muted-foreground">Taxa de Conversão Trial</p>
-                    <p className="text-3xl font-bold mt-2">–</p>
+                    <p className="text-sm text-muted-foreground">Total de Empresas</p>
+                    <p className="text-3xl font-bold mt-2">{metrics?.stats.total_companies ?? 0}</p>
                   </div>
                   <div className="p-4 border rounded-lg">
-                    <p className="text-sm text-muted-foreground">Churn Rate</p>
-                    <p className="text-3xl font-bold mt-2">–</p>
+                    <p className="text-sm text-muted-foreground">Ativas</p>
+                    <p className="text-3xl font-bold mt-2">{metrics?.stats.active_companies ?? 0}</p>
                   </div>
                   <div className="p-4 border rounded-lg">
-                    <p className="text-sm text-muted-foreground">LTV Médio</p>
-                    <p className="text-3xl font-bold mt-2">–</p>
+                    <p className="text-sm text-muted-foreground">Trials</p>
+                    <p className="text-3xl font-bold mt-2">{metrics?.stats.trial_companies ?? 0}</p>
+                  </div>
+                  <div className="p-4 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">Inadimplentes</p>
+                    <p className="text-3xl font-bold mt-2">{metrics?.stats.past_due_companies ?? 0}</p>
+                  </div>
+                  <div className="p-4 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">Canceladas</p>
+                    <p className="text-3xl font-bold mt-2">{metrics?.stats.cancelled_companies ?? 0}</p>
+                  </div>
+                  <div className="p-4 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">Receita vs mês anterior</p>
+                    <p className="text-3xl font-bold mt-2">{(metrics?.stats.revenue_change_pct ?? 0).toFixed(1)}%</p>
+                  </div>
+                  <div className="p-4 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">ARPU</p>
+                    <p className="text-3xl font-bold mt-2">R$ {(metrics?.stats.arpu ?? 0).toFixed(2)}</p>
+                  </div>
+                  <div className="p-4 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">Receita (Mês)</p>
+                    <p className="text-3xl font-bold mt-2">R$ {(metrics?.stats.revenue_month ?? 0).toFixed(2)}</p>
+                  </div>
+                  <div className="p-4 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">Novas (30d)</p>
+                    <p className="text-3xl font-bold mt-2">{metrics?.stats.new_companies_30d ?? 0}</p>
                   </div>
                 </div>
               </CardContent>
@@ -478,7 +577,7 @@ const SuperAdmin = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </DashboardLayout>
+    </SuperAdminLayout>
   );
 };
 
