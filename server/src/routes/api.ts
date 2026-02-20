@@ -37,6 +37,26 @@ const toNull = (value?: string | null) => {
   return trimmed ? trimmed : null;
 };
 
+function formatPetAge(birthDateValue: string | Date): string {
+  const birthDate = new Date(birthDateValue);
+  if (Number.isNaN(birthDate.getTime())) return '';
+
+  const now = new Date();
+  let years = now.getFullYear() - birthDate.getFullYear();
+  let months = now.getMonth() - birthDate.getMonth();
+
+  if (now.getDate() < birthDate.getDate()) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  if (years > 0) return `${years} ${years === 1 ? 'ano' : 'anos'}`;
+
+  const totalMonths = Math.max(0, years * 12 + months);
+  return `${totalMonths} ${totalMonths === 1 ? 'mês' : 'meses'}`;
+}
+
 function listParams(req: AuthReq) {
   const pageRaw = Number(req.query.page ?? 1);
   const limitRaw = Number(req.query.limit ?? 20);
@@ -267,7 +287,7 @@ export async function getPets(req: AuthReq, res: Response) {
       species: r.species,
       breed: r.breed ?? '',
       birth_date: r.birth_date ?? null,
-      age: r.birth_date ? `${Math.floor((Date.now() - new Date(r.birth_date as string).getTime()) / 31536e6)} anos` : '',
+      age: r.birth_date ? formatPetAge(r.birth_date as string) : '',
       owner: r.owner_name,
       lastVisit: r.created_at,
       status: 'healthy',
@@ -1176,7 +1196,7 @@ export async function createPet(req: AuthReq, res: Response) {
       species: p.species,
       breed: p.breed ?? '',
       birth_date: p.birth_date ?? null,
-      age: p.birth_date ? `${Math.floor((Date.now() - new Date(p.birth_date).getTime()) / 31536e6)} anos` : '',
+      age: p.birth_date ? formatPetAge(p.birth_date as string) : '',
       owner: owner.rows[0]?.name ?? '',
       lastVisit: p.created_at,
       status: 'healthy',
@@ -1214,7 +1234,7 @@ export async function updatePet(req: AuthReq, res: Response) {
       species: p.species,
       breed: p.breed ?? '',
       birth_date: p.birth_date ?? null,
-      age: p.birth_date ? `${Math.floor((Date.now() - new Date(p.birth_date).getTime()) / 31536e6)} anos` : '',
+      age: p.birth_date ? formatPetAge(p.birth_date as string) : '',
       owner: owner.rows[0]?.name ?? '',
       lastVisit: p.created_at,
       status: 'healthy',
@@ -1700,7 +1720,11 @@ export async function getMedicalRecords(req: AuthReq, res: Response) {
     if (!moduleOk) return;
 
     const { limit, offset, q, order } = listParams(req);
-    const petId = typeof req.query.pet_id === 'string' ? req.query.pet_id.trim() : '';
+    const rawPetId = typeof req.query.pet_id === 'string' ? req.query.pet_id.trim() : '';
+    if (rawPetId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(rawPetId)) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Pet inválido.', 'pet_id');
+    }
+    const petId = rawPetId || null;
 
     const { rows } = await pool.query(
       `SELECT
@@ -1720,7 +1744,7 @@ export async function getMedicalRecords(req: AuthReq, res: Response) {
        JOIN public.pets p ON p.id = mr.pet_id
        JOIN public.clients c ON c.id = p.client_id
        WHERE mr.company_id = $1
-         AND ($2 = '' OR mr.pet_id = $2)
+         AND ($2::uuid IS NULL OR mr.pet_id = $2::uuid)
          AND (
            $3 = '' OR
            p.name ILIKE '%' || $3 || '%' OR
