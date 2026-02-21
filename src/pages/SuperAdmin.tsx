@@ -91,7 +91,7 @@ const SuperAdmin = () => {
       case "active":
         return <Badge className="bg-green-500 gap-1"><CheckCircle2 className="h-3 w-3" />Ativa</Badge>;
       case "trial":
-        return <Badge className="bg-blue-500">Trial</Badge>;
+        return <Badge className="bg-primary">Trial</Badge>;
       case "past_due":
       case "overdue":
         return <Badge variant="destructive" className="gap-1"><AlertTriangle className="h-3 w-3" />Inadimplente</Badge>;

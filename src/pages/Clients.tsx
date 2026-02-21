@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Search, Plus, Phone, Mail, Dog } from "lucide-react";
+import { Search, Plus, Phone, Mail, Dog, Pencil, Trash2 } from "lucide-react";
 import { createClient, deleteClient, getClients, updateClient, type Client } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -178,7 +178,9 @@ const Clients = () => {
                         <div className="flex gap-2 justify-end">
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            title="Editar"
+                            aria-label="Editar"
                             onClick={() => {
                               setEditing(client);
                               setForm({
@@ -190,18 +192,20 @@ const Clients = () => {
                               setDialogOpen(true);
                             }}
                           >
-                            Editar
+                            <Pencil className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            title="Excluir"
+                            aria-label="Excluir"
                             onClick={() => {
                               if (window.confirm("Remover este cliente?")) {
                                 deleteMutation.mutate(client.id);
                               }
                             }}
                           >
-                            Excluir
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>

@@ -5,29 +5,29 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Building2, Bell, Users, Shield, Palette, Save } from "lucide-react";
+import { Building2, Bell, Users, Shield, Save, Upload, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useTheme } from "next-themes";
 import {
   changePassword,
   getSecuritySettings,
-  getAppearanceSettings,
   getCompanySettings,
   getCompanyUsers,
+  getMe,
   getNotificationSettings,
   inviteUser,
+  removeProfileAvatar,
   updateSecuritySettings,
-  updateAppearanceSettings,
   updateCompanySettings,
   updateCompanyUserRole,
   updateNotificationSettings,
+  uploadProfileAvatar,
   type CompanyUser,
 } from "@/lib/api";
-import { BRAND_THEMES, applyBrandPalette, resolveBrandPalette } from "@/lib/appearance";
 
 const Settings = () => {
   const queryClient = useQueryClient();
@@ -36,6 +36,7 @@ const Settings = () => {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [companyForm, setCompanyForm] = useState({
     name: "",
     cnpj: "",
@@ -51,19 +52,20 @@ const Settings = () => {
     payment_receipt: true,
     pet_birthday: false,
   });
-  const [appearanceForm, setAppearanceForm] = useState({
-    theme: "light",
-    primary_color: BRAND_THEMES[0].key,
-    logo_url: "",
-  });
   const [securityForm, setSecurityForm] = useState({ two_factor_enabled: false });
-  const { setTheme } = useTheme();
 
   const { data: companySettings } = useQuery({ queryKey: ["company-settings"], queryFn: getCompanySettings });
   const { data: notificationSettings } = useQuery({ queryKey: ["notification-settings"], queryFn: getNotificationSettings });
-  const { data: appearanceSettings } = useQuery({ queryKey: ["appearance-settings"], queryFn: getAppearanceSettings });
   const { data: securitySettings } = useQuery({ queryKey: ["security-settings"], queryFn: getSecuritySettings });
+  const { data: me, isLoading: loadingMe } = useQuery({ queryKey: ["me"], queryFn: getMe, retry: false });
   const { data: users = [] } = useQuery({ queryKey: ["company-users"], queryFn: getCompanyUsers });
+  const canManageUsers = !!me?.is_admin;
+  const myInitials = (me?.user.full_name || "U")
+    .split(" ")
+    .map((v) => v[0] ?? "")
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 
   useEffect(() => {
     if (companySettings) setCompanyForm(companySettings);
@@ -71,12 +73,6 @@ const Settings = () => {
   useEffect(() => {
     if (notificationSettings) setNotifForm(notificationSettings);
   }, [notificationSettings]);
-  useEffect(() => {
-    if (appearanceSettings) {
-      const resolved = resolveBrandPalette(appearanceSettings.primary_color);
-      setAppearanceForm({ ...appearanceSettings, primary_color: resolved.key });
-    }
-  }, [appearanceSettings]);
   useEffect(() => {
     if (securitySettings) setSecurityForm(securitySettings);
   }, [securitySettings]);
@@ -94,16 +90,6 @@ const Settings = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["notification-settings"] });
       toast.success("Preferências salvas!");
-    },
-    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Erro ao salvar."),
-  });
-  const appearanceMutation = useMutation({
-    mutationFn: updateAppearanceSettings,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["appearance-settings"] });
-      applyBrandPalette(resolveBrandPalette(appearanceForm.primary_color));
-      setTheme(appearanceForm.theme ?? "light");
-      toast.success("Aparência salva!");
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Erro ao salvar."),
   });
@@ -146,6 +132,35 @@ const Settings = () => {
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Erro ao atualizar senha."),
   });
 
+  const handleAvatarUpload = async (file: File | null) => {
+    if (!file) return;
+    try {
+      setAvatarUploading(true);
+      await uploadProfileAvatar(file);
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
+      await queryClient.invalidateQueries({ queryKey: ["company-users"] });
+      toast.success("Foto de perfil atualizada.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro ao atualizar foto.");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const handleAvatarRemove = async () => {
+    try {
+      setAvatarUploading(true);
+      await removeProfileAvatar();
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
+      await queryClient.invalidateQueries({ queryKey: ["company-users"] });
+      toast.success("Foto removida.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro ao remover foto.");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -157,12 +172,11 @@ const Settings = () => {
         </div>
 
         <Tabs defaultValue="company" className="w-full">
-          <TabsList className="grid w-full max-w-3xl grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+          <TabsList className="grid w-full max-w-3xl grid-cols-2 sm:grid-cols-2 lg:grid-cols-4">
             <TabsTrigger value="company">Empresa</TabsTrigger>
             <TabsTrigger value="notifications">Notificações</TabsTrigger>
             <TabsTrigger value="users">Usuários</TabsTrigger>
             <TabsTrigger value="security">Segurança</TabsTrigger>
-            <TabsTrigger value="appearance">Aparência</TabsTrigger>
           </TabsList>
           
           <TabsContent value="company" className="space-y-4">
@@ -308,56 +322,79 @@ const Settings = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="newUser">Adicionar Novo Usuário</Label>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <Input
-                      id="newUser"
-                      placeholder="E-mail do usuário"
-                      value={newUserEmail}
-                      onChange={(e) => setNewUserEmail(e.target.value)}
-                    />
-                    <Select value={newUserRole} onValueChange={setNewUserRole}>
-                      <SelectTrigger className="w-full sm:w-[200px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="admin">Administrador</SelectItem>
-                        <SelectItem value="supervisor">Supervisor</SelectItem>
-                        <SelectItem value="atendente">Atendente</SelectItem>
-                        <SelectItem value="usuario">Usuário</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      className="w-full sm:w-auto"
-                      onClick={() => {
-                        if (!newUserEmail.trim()) return toast.error("Informe o e-mail.");
-                        inviteMutation.mutate({
-                          full_name: "Novo usuário",
-                          email: newUserEmail.trim(),
-                          phone: "",
-                          password: "Senha123!",
-                        });
-                      }}
-                    >
-                      Convidar
-                    </Button>
+                {loadingMe ? (
+                  <p className="text-sm text-muted-foreground">Carregando permissões...</p>
+                ) : canManageUsers ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="newUser">Adicionar Novo Usuário</Label>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Input
+                        id="newUser"
+                        type="email"
+                        autoComplete="email"
+                        placeholder="E-mail do usuário"
+                        value={newUserEmail}
+                        onChange={(e) => setNewUserEmail(e.target.value)}
+                      />
+                      <Select value={newUserRole} onValueChange={setNewUserRole}>
+                        <SelectTrigger className="w-full sm:w-[200px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="admin">Administrador</SelectItem>
+                          <SelectItem value="supervisor">Supervisor</SelectItem>
+                          <SelectItem value="atendente">Atendente</SelectItem>
+                          <SelectItem value="usuario">Usuário</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        className="w-full sm:w-auto"
+                        disabled={inviteMutation.isPending}
+                        onClick={() => {
+                          if (!newUserEmail.trim()) return toast.error("Informe o e-mail.");
+                          inviteMutation.mutate({
+                            full_name: "Novo usuário",
+                            email: newUserEmail.trim(),
+                            phone: "",
+                            password: "Senha123!",
+                          });
+                        }}
+                      >
+                        Convidar
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                    Apenas administradores podem convidar usuários e alterar permissões.
+                  </div>
+                )}
                 
                 <div className="space-y-2">
                   <Label>Usuários Ativos</Label>
                   <div className="space-y-2">
                     {users.map((user: CompanyUser) => (
                       <div key={user.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 border rounded-lg">
-                        <div>
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarImage src={user.avatar_url ?? ""} alt={user.name} />
+                            <AvatarFallback className="bg-primary/10 text-primary">
+                              {user.name.split(" ").map((part) => part[0] ?? "").join("").toUpperCase().slice(0, 2)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
                           <p className="font-medium">{user.name}</p>
                           <p className="text-sm text-muted-foreground">{user.email}</p>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <Select
                             value={user.role}
-                            onValueChange={(v) => roleMutation.mutate({ id: user.id, role: v })}
+                            disabled={!canManageUsers}
+                            onValueChange={(v) => {
+                              if (!canManageUsers) return;
+                              roleMutation.mutate({ id: user.id, role: v });
+                            }}
                           >
                             <SelectTrigger className="w-[160px]">
                               <SelectValue />
@@ -391,18 +428,83 @@ const Settings = () => {
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-2">
+                  <Label>Foto do Perfil</Label>
+                  <div className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-12 w-12">
+                        <AvatarImage src={me?.user.avatar_url ?? ""} alt={me?.user.full_name ?? "Usuário"} />
+                        <AvatarFallback className="bg-primary/10 text-primary">{myInitials}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-sm font-medium">Imagem exibida no sistema e relatórios de usuários</p>
+                        <p className="text-xs text-muted-foreground">PNG, JPG ou WEBP até 8MB</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={avatarUploading}
+                        onClick={() => document.getElementById("profileAvatarInput")?.click()}
+                      >
+                        <Upload className="mr-2 h-4 w-4" />
+                        Enviar foto
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={avatarUploading || !me?.user.avatar_url}
+                        onClick={handleAvatarRemove}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Remover
+                      </Button>
+                      <input
+                        id="profileAvatarInput"
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] ?? null;
+                          void handleAvatarUpload(file);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="currentPassword">Senha Atual</Label>
-                  <Input id="currentPassword" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+                  <Input
+                    id="currentPassword"
+                    type="password"
+                    autoComplete="current-password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                  />
                 </div>
                 
                 <div className="space-y-2">
                   <Label htmlFor="newPassword">Nova Senha</Label>
-                  <Input id="newPassword" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                  <Input
+                    id="newPassword"
+                    type="password"
+                    autoComplete="new-password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
                 </div>
                 
                 <div className="space-y-2">
                   <Label htmlFor="confirmPassword">Confirmar Nova Senha</Label>
-                  <Input id="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                  />
                 </div>
                 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-4 border-t">
@@ -434,82 +536,6 @@ const Settings = () => {
             </Card>
           </TabsContent>
           
-          <TabsContent value="appearance" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <Palette className="h-6 w-6 text-primary" />
-                  <div>
-                    <CardTitle>Aparência</CardTitle>
-                    <CardDescription>Personalize a interface do sistema</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <Label>Tema</Label>
-                  <Select
-                    value={appearanceForm.theme}
-                    onValueChange={(v) => setAppearanceForm((f) => ({ ...f, theme: v }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="light">Claro</SelectItem>
-                      <SelectItem value="dark">Escuro</SelectItem>
-                      <SelectItem value="system">Sistema</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label>Cor Principal</Label>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    {BRAND_THEMES.map((theme) => {
-                      const selected = appearanceForm.primary_color === theme.key;
-                      return (
-                        <button
-                          key={theme.key}
-                          type="button"
-                          onClick={() => setAppearanceForm((f) => ({ ...f, primary_color: theme.key }))}
-                          className={`flex items-center gap-3 rounded-lg border p-2 text-left transition-all ${selected ? "border-primary shadow-sm" : "border-border hover:border-primary/40"}`}
-                          aria-pressed={selected}
-                        >
-                          <span
-                            className="h-10 w-10 rounded-md"
-                            style={{
-                              background: `linear-gradient(135deg, hsl(${theme.primary}) 0%, hsl(${theme.primarySoft}) 100%)`,
-                            }}
-                          />
-                          <span className="text-sm font-medium">{theme.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="logo">Logo da Empresa</Label>
-                  <Input
-                    id="logo"
-                    type="text"
-                    placeholder="URL do logo"
-                    value={appearanceForm.logo_url}
-                    onChange={(e) => setAppearanceForm((f) => ({ ...f, logo_url: e.target.value }))}
-                  />
-                </div>
-                
-                <Button
-                  onClick={() => appearanceMutation.mutate(appearanceForm)}
-                  className="gap-2"
-                >
-                  <Save className="h-4 w-4" />
-                  Salvar Aparência
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
         </Tabs>
       </div>
     </DashboardLayout>

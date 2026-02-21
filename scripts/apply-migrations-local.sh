@@ -13,21 +13,37 @@ DB="${PGDATABASE:-petpro_dev}"
 echo "Aplicando migrations em $USER@$DB (container $CONTAINER) ..."
 
 run_sql() {
-  docker exec -i "$CONTAINER" psql -U "$USER" -d "$DB" "$@"
+  docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER" -d "$DB" "$@"
 }
 
-run_sql < scripts/local/01_auth_stub.sql
-run_sql < db/migrations/001_schema.sql
-run_sql < db/migrations/002_fix_search_path.sql
-run_sql < db/migrations/003_entities.sql
-run_sql < db/migrations/004_auth_encrypted_password.sql
-run_sql < db/migrations/005_settings.sql
-run_sql < db/migrations/006_user_security.sql
-run_sql < db/migrations/007_audit_logs.sql
-run_sql < db/migrations/008_listing_indexes.sql
-run_sql < db/migrations/009_medical_records.sql
-run_sql < db/migrations/010_reminder_jobs.sql
-run_sql < db/migrations/011_cashbook_payments.sql
+table_exists() {
+  local table="$1"
+  docker exec -i "$CONTAINER" psql -U "$USER" -d "$DB" -tA -c \
+    "SELECT EXISTS (
+       SELECT 1
+       FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = '$table'
+     );"
+}
+
+if [[ "$(table_exists companies)" == "t" ]]; then
+  echo "Schema base detectado, pulando migrations 001-011."
+else
+  run_sql < scripts/local/01_auth_stub.sql
+  run_sql < db/migrations/001_schema.sql
+  run_sql < db/migrations/002_fix_search_path.sql
+  run_sql < db/migrations/003_entities.sql
+  run_sql < db/migrations/004_auth_encrypted_password.sql
+  run_sql < db/migrations/005_settings.sql
+  run_sql < db/migrations/006_user_security.sql
+  run_sql < db/migrations/007_audit_logs.sql
+  run_sql < db/migrations/008_listing_indexes.sql
+  run_sql < db/migrations/009_medical_records.sql
+  run_sql < db/migrations/010_reminder_jobs.sql
+  run_sql < db/migrations/011_cashbook_payments.sql
+fi
+
+run_sql < db/migrations/012_attachments_avatars.sql
 run_sql < scripts/local/02_disable_rls_local.sql
 run_sql < db/seed.sql
 

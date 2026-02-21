@@ -60,7 +60,7 @@ function createState(): MockState {
       { id: USER_ID, company_id: COMPANY_ID },
       { id: ADMIN_ID, company_id: COMPANY_ID },
     ],
-    companies: [{ id: COMPANY_ID, name: 'Pet Pro Test', status: 'active', current_plan_id: 'plan-pro' }],
+    companies: [{ id: COMPANY_ID, name: 'FourPet Pro Test', status: 'active', current_plan_id: 'plan-pro' }],
     plans: [
       {
         id: 'plan-pro',

@@ -42,7 +42,8 @@ export const SuperAdminLayout = ({ children }: SuperAdminLayoutProps) => {
             </div>
             <div>
               <p className="text-sm uppercase tracking-widest text-muted-foreground">Super Admin</p>
-              <p className="text-lg font-semibold">Pet Pro Suite</p>
+              <p className="text-lg font-semibold">FourPet Pro</p>
+              <p className="text-xs text-muted-foreground">Gestão inteligente para negócios de quatro patas.</p>
             </div>
           </div>
           <div className="flex gap-2">

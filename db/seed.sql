@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 INSERT INTO public.companies (id, name, cnpj, status)
 VALUES (
   '11111111-1111-1111-1111-111111111111'::uuid,
-  'Pet Pro Demo',
+  'FourPet Pro Demo',
   '00.000.000/0001-00',
   'active'
 )

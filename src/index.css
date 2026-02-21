@@ -1,8 +1,14 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
 
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here.
 All colors MUST be HSL.
@@ -10,33 +16,33 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 215 25% 15%;
+    --background: 14 35% 93%;
+    --foreground: 216 24% 20%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 215 25% 15%;
+    --card: 36 100% 99%;
+    --card-foreground: 216 24% 20%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 215 25% 15%;
+    --popover: 36 100% 99%;
+    --popover-foreground: 216 24% 20%;
 
-    --primary: 180 60% 45%;
+    --primary: 32 66% 37%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 15% 95%;
-    --secondary-foreground: 215 25% 15%;
+    --secondary: 23 39% 91%;
+    --secondary-foreground: 216 24% 20%;
 
-    --muted: 210 15% 95%;
-    --muted-foreground: 215 15% 45%;
+    --muted: 23 39% 91%;
+    --muted-foreground: 30 14% 38%;
 
-    --accent: 15 75% 60%;
+    --accent: 31 56% 46%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 70% 55%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 210 20% 90%;
-    --input: 210 20% 90%;
-    --ring: 180 60% 45%;
+    --border: 21 38% 87%;
+    --input: 21 38% 87%;
+    --ring: 32 66% 37%;
 
     --radius: 0.75rem;
 
@@ -49,53 +55,53 @@ All colors MUST be HSL.
     --info: 200 80% 50%;
     --info-foreground: 0 0% 100%;
 
-    --gradient-primary: linear-gradient(135deg, hsl(180 60% 45%) 0%, hsl(180 70% 55%) 100%);
-    --gradient-accent: linear-gradient(135deg, hsl(15 75% 60%) 0%, hsl(25 80% 65%) 100%);
-    --gradient-subtle: linear-gradient(180deg, hsl(210 20% 98%) 0%, hsl(210 15% 96%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(32 66% 37%) 0%, hsl(35 100% 70%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(31 56% 46%) 0%, hsl(35 100% 65%) 100%);
+    --gradient-subtle: linear-gradient(180deg, hsl(14 35% 93%) 0%, hsl(23 39% 91%) 100%);
 
-    --shadow-sm: 0 1px 2px 0 hsl(215 25% 15% / 0.05);
-    --shadow-md: 0 4px 6px -1px hsl(215 25% 15% / 0.1), 0 2px 4px -2px hsl(215 25% 15% / 0.1);
-    --shadow-lg: 0 10px 15px -3px hsl(215 25% 15% / 0.1), 0 4px 6px -4px hsl(215 25% 15% / 0.1);
-    --shadow-primary: 0 8px 16px -4px hsl(180 60% 45% / 0.25);
+    --shadow-sm: 0 1px 2px 0 hsl(216 24% 20% / 0.05);
+    --shadow-md: 0 4px 6px -1px hsl(216 24% 20% / 0.1), 0 2px 4px -2px hsl(216 24% 20% / 0.1);
+    --shadow-lg: 0 10px 15px -3px hsl(216 24% 20% / 0.1), 0 4px 6px -4px hsl(216 24% 20% / 0.1);
+    --shadow-primary: 0 8px 16px -4px hsl(32 66% 37% / 0.28);
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 36 80% 98%;
+    --sidebar-foreground: 216 24% 20%;
+    --sidebar-primary: 32 66% 37%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 23 39% 91%;
+    --sidebar-accent-foreground: 216 24% 20%;
+    --sidebar-border: 21 38% 87%;
+    --sidebar-ring: 32 66% 37%;
   }
 
   .dark {
-    --background: 215 30% 8%;
-    --foreground: 210 20% 95%;
+    --background: 26 18% 10%;
+    --foreground: 34 35% 93%;
 
-    --card: 215 25% 10%;
-    --card-foreground: 210 20% 95%;
+    --card: 24 16% 13%;
+    --card-foreground: 34 35% 93%;
 
-    --popover: 215 25% 10%;
-    --popover-foreground: 210 20% 95%;
+    --popover: 24 16% 13%;
+    --popover-foreground: 34 35% 93%;
 
-    --primary: 180 60% 50%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 35 82% 62%;
+    --primary-foreground: 25 30% 12%;
 
-    --secondary: 215 20% 15%;
-    --secondary-foreground: 210 20% 95%;
+    --secondary: 25 13% 18%;
+    --secondary-foreground: 34 30% 90%;
 
-    --muted: 215 20% 15%;
-    --muted-foreground: 215 15% 60%;
+    --muted: 25 13% 18%;
+    --muted-foreground: 30 12% 68%;
 
-    --accent: 15 75% 55%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 32 68% 54%;
+    --accent-foreground: 25 30% 12%;
 
     --destructive: 0 70% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 215 20% 20%;
-    --input: 215 20% 20%;
-    --ring: 180 60% 50%;
+    --border: 24 12% 23%;
+    --input: 24 12% 23%;
+    --ring: 35 82% 62%;
 
     --success: 142 70% 45%;
     --success-foreground: 0 0% 100%;
@@ -106,23 +112,23 @@ All colors MUST be HSL.
     --info: 200 80% 50%;
     --info-foreground: 0 0% 100%;
 
-    --gradient-primary: linear-gradient(135deg, hsl(180 60% 40%) 0%, hsl(180 70% 50%) 100%);
-    --gradient-accent: linear-gradient(135deg, hsl(15 75% 55%) 0%, hsl(25 80% 60%) 100%);
-    --gradient-subtle: linear-gradient(180deg, hsl(215 30% 8%) 0%, hsl(215 25% 10%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(32 66% 44%) 0%, hsl(35 82% 62%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(31 56% 42%) 0%, hsl(35 82% 62%) 100%);
+    --gradient-subtle: linear-gradient(180deg, hsl(26 18% 10%) 0%, hsl(24 16% 13%) 100%);
 
     --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.3);
     --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.4), 0 2px 4px -2px hsl(0 0% 0% / 0.3);
     --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.4), 0 4px 6px -4px hsl(0 0% 0% / 0.3);
-    --shadow-primary: 0 8px 16px -4px hsl(180 60% 50% / 0.35);
+    --shadow-primary: 0 8px 16px -4px hsl(35 82% 62% / 0.35);
 
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 24 16% 12%;
+    --sidebar-foreground: 34 30% 90%;
+    --sidebar-primary: 35 82% 62%;
+    --sidebar-primary-foreground: 25 30% 12%;
+    --sidebar-accent: 24 12% 20%;
+    --sidebar-accent-foreground: 34 30% 90%;
+    --sidebar-border: 24 12% 23%;
+    --sidebar-ring: 35 82% 62%;
   }
 }
 
@@ -161,6 +167,13 @@ All colors MUST be HSL.
     background-image:
       radial-gradient(1200px circle at 10% 10%, hsl(var(--primary) / 0.12), transparent 55%),
       radial-gradient(900px circle at 90% 10%, hsl(var(--primary) / 0.08), transparent 50%),
+      linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--muted)) 100%);
+  }
+
+  .dark .bg-hero {
+    background-image:
+      radial-gradient(1100px circle at 10% 10%, hsl(var(--primary) / 0.045), transparent 58%),
+      radial-gradient(900px circle at 90% 10%, hsl(var(--primary) / 0.03), transparent 54%),
       linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--muted)) 100%);
   }
 
@@ -214,5 +227,54 @@ All colors MUST be HSL.
   @keyframes typing-bounce {
     0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
     40% { transform: scale(1); opacity: 1; }
+  }
+
+  .animate-landing-rise {
+    animation: landing-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .animate-landing-float {
+    animation: landing-float 5s ease-in-out infinite;
+  }
+
+  .animate-landing-chip {
+    animation: landing-chip 6.6s ease-in-out infinite;
+  }
+
+  .landing-chip-delay-1 {
+    animation-delay: 0.8s;
+  }
+
+  .landing-chip-delay-2 {
+    animation-delay: 1.7s;
+  }
+
+  @keyframes landing-rise {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes landing-float {
+    0%, 100% {
+      transform: translate(-50%, 0);
+    }
+    50% {
+      transform: translate(-50%, -10px);
+    }
+  }
+
+  @keyframes landing-chip {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
   }
 }

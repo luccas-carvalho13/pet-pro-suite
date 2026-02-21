@@ -5,11 +5,15 @@
  * dados de outra empresa.
  */
 import { Response } from 'express';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { pool } from '../db.js';
 import type { AuthReq } from '../middleware.js';
 import { parseWithSchema, sendError } from '../http-error.js';
 import { assertPlanLimit, assertPlanModuleAccess } from '../plan-access.js';
 import {
+  attachmentUploadSchema,
+  avatarUploadSchema,
   appointmentPaymentPayloadSchema,
   appointmentPayloadSchema,
   appearanceSettingsSchema,
@@ -21,6 +25,7 @@ import {
   reminderProcessPayloadSchema,
   notificationSettingsSchema,
   planPayloadSchema,
+  profileUpdateSchema,
   productPayloadSchema,
   securitySettingsSchema,
   servicePayloadSchema,
@@ -36,6 +41,62 @@ const toNull = (value?: string | null) => {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 };
+const APP_TIMEZONE = process.env.APP_TIMEZONE ?? 'America/Sao_Paulo';
+const UPLOAD_ROOT = path.resolve(process.cwd(), 'uploads');
+const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
+const allowedMimeTypes = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/plain',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+const avatarMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+type ParsedDataUrl = { mimeType: string; bytes: Buffer };
+
+function sanitizeFilename(name: string) {
+  const cleaned = name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  return cleaned || 'arquivo';
+}
+
+function detectFileExt(mimeType: string) {
+  if (mimeType === 'application/pdf') return 'pdf';
+  if (mimeType === 'image/jpeg') return 'jpg';
+  if (mimeType === 'image/png') return 'png';
+  if (mimeType === 'image/webp') return 'webp';
+  if (mimeType === 'text/plain') return 'txt';
+  if (mimeType === 'application/msword') return 'doc';
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+  return 'bin';
+}
+
+function parseDataUrl(dataUrl: string): ParsedDataUrl | null {
+  const value = dataUrl.trim();
+  const match = /^data:([^;,]+);base64,(.+)$/i.exec(value);
+  if (!match) return null;
+  const mimeType = match[1].toLowerCase();
+  const base64 = match[2];
+  try {
+    const bytes = Buffer.from(base64, 'base64');
+    if (!bytes.length) return null;
+    return { mimeType, bytes };
+  } catch {
+    return null;
+  }
+}
+
+function absoluteUploadUrl(req: AuthReq, relativePath: string) {
+  return `${req.protocol}://${req.get('host')}${relativePath}`;
+}
+
+function formatTimePtBr(value: string | Date): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIMEZONE });
+}
 
 function formatPetAge(birthDateValue: string | Date): string {
   const birthDate = new Date(birthDateValue);
@@ -164,10 +225,19 @@ async function syncAppointmentReminder(input: {
   }
 }
 
+function formatDateOnlyLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function toDateOnly(value: string) {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
-  return d.toISOString().slice(0, 10);
+  if (Number.isNaN(d.getTime())) return formatDateOnlyLocal(new Date());
+  return formatDateOnlyLocal(d);
 }
 
 export async function dashboardStats(req: AuthReq, res: Response) {
@@ -177,8 +247,8 @@ export async function dashboardStats(req: AuthReq, res: Response) {
       return res.json({ stats: [], upcomingAppointments: [], lowStockItems: [] });
     }
 
-    const today = new Date().toISOString().slice(0, 10);
-    const tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+    const today = formatDateOnlyLocal(new Date());
+    const monthStart = formatDateOnlyLocal(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
     const [clientsCount, appointmentsToday, appointmentsList, lowStock, revenues] = await Promise.all([
       pool.query('SELECT COUNT(*)::int AS c FROM public.clients WHERE company_id = $1', [cid]),
@@ -202,7 +272,7 @@ export async function dashboardStats(req: AuthReq, res: Response) {
       ),
       pool.query(
         `SELECT COALESCE(SUM(value),0)::float AS total FROM public.transactions WHERE company_id = $1 AND type = 'revenue' AND date >= $2`,
-        [cid, new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)]
+        [cid, monthStart]
       ),
     ]);
 
@@ -214,7 +284,7 @@ export async function dashboardStats(req: AuthReq, res: Response) {
     ];
 
     const upcomingAppointments = (appointmentsList.rows || []).map((r: { scheduled_at: string; client_name: string; pet_name: string; service_name: string }) => ({
-      time: new Date(r.scheduled_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      time: formatTimePtBr(r.scheduled_at),
       client: r.client_name,
       pet: r.pet_name,
       service: r.service_name,
@@ -394,7 +464,7 @@ export async function getAppointments(req: AuthReq, res: Response) {
       pet_id: r.pet_id,
       service_id: r.service_id,
       scheduledAt: r.scheduled_at,
-      time: new Date(r.scheduled_at as string).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      time: formatTimePtBr(r.scheduled_at as string),
       duration: `${r.duration_minutes} min`,
       client: r.client_name,
       pet: r.pet_name,
@@ -716,7 +786,7 @@ export async function getCompanyUsers(req: AuthReq, res: Response) {
     const cid = ensureCompanyId(req, res);
     if (!cid) return;
     const { rows } = await pool.query(
-      `SELECT p.id, p.full_name, p.email, r.role
+      `SELECT p.id, p.full_name, p.email, p.avatar_url, r.role
        FROM public.profiles p
        LEFT JOIN public.user_roles r ON r.user_id = p.id AND r.company_id = $1
        WHERE p.company_id = $1
@@ -727,11 +797,231 @@ export async function getCompanyUsers(req: AuthReq, res: Response) {
       id: r.id,
       name: r.full_name,
       email: r.email,
+      avatar_url: r.avatar_url,
       role: r.role ?? 'usuario',
     })));
   } catch (e) {
     console.error('getCompanyUsers:', e);
     res.status(500).json({ error: 'Erro ao listar usuários.' });
+  }
+}
+
+export async function getAttachments(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const entityType = typeof req.query.entity_type === 'string' ? req.query.entity_type : '';
+    const entityId = typeof req.query.entity_id === 'string' ? req.query.entity_id : '';
+    const isValidType = ['medical_record', 'appointment', 'transaction', 'client', 'pet'].includes(entityType);
+    const isValidId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entityId);
+    if (!isValidType || !isValidId) return sendError(res, 400, 'VALIDATION_ERROR', 'Parâmetros de anexo inválidos.');
+
+    const { rows } = await pool.query(
+      `SELECT id, file_name, file_url, mime_type, size_bytes, created_at
+       FROM public.entity_attachments
+       WHERE company_id = $1 AND entity_type = $2 AND entity_id = $3
+       ORDER BY created_at DESC`,
+      [cid, entityType, entityId]
+    );
+
+    res.json(
+      rows.map((r: Record<string, unknown>) => ({
+        id: r.id,
+        file_name: r.file_name,
+        file_url: r.file_url,
+        mime_type: r.mime_type,
+        size_bytes: Number(r.size_bytes ?? 0),
+        created_at: r.created_at,
+      }))
+    );
+  } catch (e) {
+    console.error('getAttachments:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao listar anexos.');
+  }
+}
+
+export async function uploadAttachment(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const parsed = parseWithSchema(res, attachmentUploadSchema, req.body);
+    if (!parsed) return;
+
+    const entityTable = tableByEntityType(parsed.entity_type);
+    const entityOk = await ensureCompanyRow(entityTable, parsed.entity_id, cid);
+    if (!entityOk) return sendError(res, 400, 'VALIDATION_ERROR', 'Registro não encontrado para anexo.');
+
+    const parsedData = parseDataUrl(parsed.data_url);
+    if (!parsedData) return sendError(res, 400, 'VALIDATION_ERROR', 'Arquivo inválido.');
+    if (!allowedMimeTypes.has(parsedData.mimeType)) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Tipo de arquivo não suportado.');
+    }
+    if (parsedData.bytes.length > MAX_FILE_SIZE_BYTES) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Arquivo excede o limite de 8MB.');
+    }
+
+    const safeName = sanitizeFilename(parsed.file_name);
+    const ext = detectFileExt(parsedData.mimeType);
+    const companyDir = path.join(UPLOAD_ROOT, cid);
+    await mkdir(companyDir, { recursive: true });
+    const basename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+    const diskPath = path.join(companyDir, basename);
+    await writeFile(diskPath, parsedData.bytes);
+
+    const relativeUrl = `/uploads/${cid}/${basename}`;
+    const fileUrl = absoluteUploadUrl(req, relativeUrl);
+    const { rows } = await pool.query(
+      `INSERT INTO public.entity_attachments
+        (company_id, entity_type, entity_id, file_name, file_url, mime_type, size_bytes, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, file_name, file_url, mime_type, size_bytes, created_at`,
+      [cid, parsed.entity_type, parsed.entity_id, safeName, fileUrl, parsedData.mimeType, parsedData.bytes.length, req.userId ?? null]
+    );
+
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    console.error('uploadAttachment:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao enviar anexo.');
+  }
+}
+
+export async function deleteAttachment(req: AuthReq, res: Response) {
+  try {
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const id = req.params.id;
+    const { rows } = await pool.query(
+      `DELETE FROM public.entity_attachments
+       WHERE id = $1 AND company_id = $2
+       RETURNING file_url`,
+      [id, cid]
+    );
+    if (!rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Anexo não encontrado.');
+
+    const fileUrl = String(rows[0].file_url ?? '');
+    if (fileUrl) {
+      try {
+        const url = new URL(fileUrl);
+        const relativePath = decodeURIComponent(url.pathname);
+        if (relativePath.startsWith('/uploads/')) {
+          const localPath = path.join(UPLOAD_ROOT, relativePath.replace('/uploads/', ''));
+          await unlink(localPath).catch(() => undefined);
+        }
+      } catch {
+        // noop
+      }
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('deleteAttachment:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover anexo.');
+  }
+}
+
+export async function uploadProfileAvatar(req: AuthReq, res: Response) {
+  try {
+    if (!req.userId) return sendError(res, 401, 'UNAUTHORIZED', 'Não autenticado.');
+    const cid = ensureCompanyId(req, res);
+    if (!cid) return;
+    const parsed = parseWithSchema(res, avatarUploadSchema, req.body);
+    if (!parsed) return;
+
+    const parsedData = parseDataUrl(parsed.data_url);
+    if (!parsedData) return sendError(res, 400, 'VALIDATION_ERROR', 'Arquivo inválido.');
+    if (!avatarMimeTypes.has(parsedData.mimeType)) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Avatar deve ser JPG, PNG ou WEBP.');
+    }
+    if (parsedData.bytes.length > MAX_FILE_SIZE_BYTES) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Arquivo excede o limite de 8MB.');
+    }
+
+    const ext = detectFileExt(parsedData.mimeType);
+    const companyDir = path.join(UPLOAD_ROOT, cid, 'avatars');
+    await mkdir(companyDir, { recursive: true });
+    const basename = `${req.userId}-${Date.now()}.${ext}`;
+    const diskPath = path.join(companyDir, basename);
+    await writeFile(diskPath, parsedData.bytes);
+
+    const avatarUrl = absoluteUploadUrl(req, `/uploads/${cid}/avatars/${basename}`);
+    await pool.query(`UPDATE public.profiles SET avatar_url = $1 WHERE id = $2`, [avatarUrl, req.userId]);
+    res.json({ avatar_url: avatarUrl });
+  } catch (e) {
+    console.error('uploadProfileAvatar:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar avatar.');
+  }
+}
+
+export async function removeProfileAvatar(req: AuthReq, res: Response) {
+  try {
+    if (!req.userId) return sendError(res, 401, 'UNAUTHORIZED', 'Não autenticado.');
+    const { rows } = await pool.query(
+      `UPDATE public.profiles SET avatar_url = NULL WHERE id = $1 RETURNING avatar_url`,
+      [req.userId]
+    );
+    const prev = String(rows[0]?.avatar_url ?? '');
+    if (prev) {
+      try {
+        const url = new URL(prev);
+        const relativePath = decodeURIComponent(url.pathname);
+        if (relativePath.startsWith('/uploads/')) {
+          const localPath = path.join(UPLOAD_ROOT, relativePath.replace('/uploads/', ''));
+          await unlink(localPath).catch(() => undefined);
+        }
+      } catch {
+        // noop
+      }
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('removeProfileAvatar:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao remover avatar.');
+  }
+}
+
+export async function updateMyProfile(req: AuthReq, res: Response) {
+  try {
+    if (!req.userId) return sendError(res, 401, 'UNAUTHORIZED', 'Não autenticado.');
+    const parsed = parseWithSchema(res, profileUpdateSchema, req.body);
+    if (!parsed) return;
+    const fullName = parsed.full_name.trim();
+    const email = parsed.email.trim().toLowerCase();
+
+    const current = await pool.query(`SELECT id, email, raw_user_meta_data FROM auth.users WHERE id = $1`, [req.userId]);
+    if (!current.rows[0]) return sendError(res, 404, 'NOT_FOUND', 'Usuário não encontrado.');
+
+    const emailChanged = String(current.rows[0].email ?? '').toLowerCase() !== email;
+    if (emailChanged) {
+      const exists = await pool.query(`SELECT id FROM auth.users WHERE email = $1 AND id <> $2 LIMIT 1`, [email, req.userId]);
+      if (exists.rows[0]) return sendError(res, 409, 'CONFLICT', 'Este e-mail já está em uso.', 'email');
+    }
+
+    const rawMeta = (current.rows[0].raw_user_meta_data ?? {}) as Record<string, unknown>;
+    const updatedMeta = { ...rawMeta, full_name: fullName };
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`UPDATE auth.users SET email = $1, raw_user_meta_data = $2 WHERE id = $3`, [email, JSON.stringify(updatedMeta), req.userId]);
+      await client.query(`UPDATE public.profiles SET full_name = $1, email = $2 WHERE id = $3`, [fullName, email, req.userId]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    const result = await pool.query(`SELECT id, full_name, email, avatar_url FROM public.profiles WHERE id = $1`, [req.userId]);
+    const me = result.rows[0];
+    res.json({
+      id: me.id,
+      full_name: me.full_name,
+      email: me.email,
+      avatar_url: me.avatar_url ?? null,
+    });
+  } catch (e) {
+    console.error('updateMyProfile:', e);
+    sendError(res, 500, 'INTERNAL_ERROR', 'Erro ao atualizar perfil.');
   }
 }
 
@@ -822,6 +1112,19 @@ export async function exportReport(req: AuthReq, res: Response) {
         r.name, r.category, r.duration_minutes, r.price, r.commission_pct,
       ]));
       filename = 'servicos.csv';
+    } else if (type === 'users') {
+      const { rows } = await pool.query(
+        `SELECT p.full_name, p.email, COALESCE(r.role, 'usuario') AS role, p.avatar_url, p.created_at
+         FROM public.profiles p
+         LEFT JOIN public.user_roles r ON r.user_id = p.id AND r.company_id = p.company_id
+         WHERE p.company_id = $1
+         ORDER BY p.full_name`,
+        [cid]
+      );
+      csv = toCsv(['Nome', 'E-mail', 'Perfil', 'Avatar', 'Criado em'], rows.map((r) => [
+        r.full_name, r.email, r.role, r.avatar_url, r.created_at,
+      ]));
+      filename = 'usuarios.csv';
     } else {
       return res.status(400).json({ error: 'Tipo de relatório inválido.' });
     }
@@ -1084,6 +1387,14 @@ async function ensureCompanyRow(
     [id, companyIdVal]
   );
   return rows.length > 0;
+}
+
+function tableByEntityType(entityType: 'medical_record' | 'appointment' | 'transaction' | 'client' | 'pet') {
+  if (entityType === 'medical_record') return 'medical_records' as const;
+  if (entityType === 'appointment') return 'appointments' as const;
+  if (entityType === 'transaction') return 'transactions' as const;
+  if (entityType === 'client') return 'clients' as const;
+  return 'pets' as const;
 }
 
 export async function createClient(req: AuthReq, res: Response) {
@@ -1478,7 +1789,7 @@ export async function createAppointment(req: AuthReq, res: Response) {
       pet_id,
       service_id,
       scheduledAt: a.scheduled_at,
-      time: new Date(a.scheduled_at as string).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      time: formatTimePtBr(a.scheduled_at as string),
       duration: `${a.duration_minutes} min`,
       client: meta?.client_name ?? '',
       pet: meta?.pet_name ?? '',
@@ -1546,7 +1857,7 @@ export async function updateAppointment(req: AuthReq, res: Response) {
       pet_id,
       service_id,
       scheduledAt: a.scheduled_at,
-      time: new Date(a.scheduled_at as string).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      time: formatTimePtBr(a.scheduled_at as string),
       duration: `${a.duration_minutes} min`,
       client: meta?.client_name ?? '',
       pet: meta?.pet_name ?? '',

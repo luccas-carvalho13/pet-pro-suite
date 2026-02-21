@@ -15,13 +15,12 @@ import {
   LifeBuoy,
   Send,
   Settings,
-  UserPlus,
   ClipboardList,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
 import { NavProjects } from "@/components/nav-projects"
-import { NavSecondary } from "@/components/nav-secondary"
+import { NavSecondary, type NavSecondaryItem } from "@/components/nav-secondary"
 import { NavUser } from "@/components/nav-user"
 import {
   Sidebar,
@@ -103,10 +102,10 @@ const navMain = [
   },
 ]
 
-const navSecondaryBase = [
+const navSecondaryBase: NavSecondaryItem[] = [
   { title: "Configurações", url: "/settings", icon: Settings },
-  { title: "Support", url: "#", icon: LifeBuoy },
-  { title: "Feedback", url: "#", icon: Send },
+  { title: "Suporte", url: "/support", icon: LifeBuoy },
+  { title: "Feedback", url: "/feedback", icon: Send },
 ]
 
 const defaultUser = {
@@ -133,12 +132,10 @@ export function AppSidebar({
   })
   const me = meProp ?? meQuery
   const userData = userProp ?? (me?.user
-    ? { name: me.user.full_name || "Usuário", email: me.user.email, avatar: "" }
+    ? { name: me.user.full_name || "Usuário", email: me.user.email, avatar: me.user.avatar_url ?? "" }
     : defaultUser)
   const companyName = me?.company?.name ?? "Clínica Veterinária"
-  const navSecondary = me?.is_admin
-    ? [{ title: "Convidar", url: "/invite", icon: UserPlus }, ...navSecondaryBase]
-    : navSecondaryBase
+  const navSecondary: NavSecondaryItem[] = navSecondaryBase
 
   return (
     <Sidebar variant="inset" collapsible="icon" {...props}>
@@ -151,7 +148,7 @@ export function AppSidebar({
                   <PawPrint className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">Pet Pro Suite</span>
+                  <span className="truncate font-semibold">FourPet Pro</span>
                   <span className="truncate text-xs text-muted-foreground">{companyName}</span>
                 </div>
               </Link>

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Search, Package, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
+import { Plus, Search, Package, AlertTriangle, TrendingDown, TrendingUp, Pencil, Trash2 } from "lucide-react";
 import { createProduct, deleteProduct, getProducts, updateProduct, type Product } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -75,9 +75,9 @@ const Inventory = () => {
   const lowCount = products.filter((p: Product) => p.status === "low" || p.status === "critical").length;
   const stats = [
     { label: "Total de Produtos", value: String(products.length), icon: Package, color: "text-primary" },
-    { label: "Estoque Baixo", value: String(lowCount), icon: AlertTriangle, color: "text-orange-500" },
-    { label: "Entrada (Mês)", value: "–", icon: TrendingUp, color: "text-green-500" },
-    { label: "Saída (Mês)", value: "–", icon: TrendingDown, color: "text-red-500" },
+    { label: "Estoque Baixo", value: String(lowCount), icon: AlertTriangle, color: "text-warning" },
+    { label: "Entrada (Mês)", value: "–", icon: TrendingUp, color: "text-success" },
+    { label: "Saída (Mês)", value: "–", icon: TrendingDown, color: "text-destructive" },
   ];
 
   const getStockBadge = (status: string) => {
@@ -85,7 +85,7 @@ const Inventory = () => {
       case "critical":
         return <Badge variant="destructive">Crítico</Badge>;
       case "low":
-        return <Badge className="bg-orange-500">Baixo</Badge>;
+        return <Badge className="bg-warning text-warning-foreground">Baixo</Badge>;
       default:
         return <Badge variant="secondary">Normal</Badge>;
     }
@@ -174,7 +174,9 @@ const Inventory = () => {
                         <div className="flex gap-2 justify-end">
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            title="Editar"
+                            aria-label="Editar"
                             onClick={() => {
                               setEditing(p);
                               setForm({
@@ -188,16 +190,18 @@ const Inventory = () => {
                               setDialogOpen(true);
                             }}
                           >
-                            Editar
+                            <Pencil className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            title="Excluir"
+                            aria-label="Excluir"
                             onClick={() => {
                               if (window.confirm("Remover este produto?")) deleteMutation.mutate(p.id);
                             }}
                           >
-                            Excluir
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>

@@ -4,7 +4,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Plus, Clock, User, Dog } from "lucide-react";
+import { Calendar, Plus, Clock, User, Dog, Pencil, Trash2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -74,10 +74,25 @@ const Appointments = () => {
   });
 
   const isSameDay = (d1: Date, d2: Date) => d1.toDateString() === d2.toDateString();
-  const toLocalInput = (iso: string) => {
-    const d = new Date(iso);
-    const tz = d.getTimezoneOffset() * 60000;
-    return new Date(d.getTime() - tz).toISOString().slice(0, 16);
+  const formatPart = (value: number) => String(value).padStart(2, "0");
+  const toLocalInput = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${formatPart(d.getMonth() + 1)}-${formatPart(d.getDate())}T${formatPart(d.getHours())}:${formatPart(d.getMinutes())}`;
+  };
+  const toIsoFromLocalInput = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toISOString();
+  };
+  const toPtBrTime = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  };
+  const getAppointmentTime = (apt: Appointment) => {
+    const localTime = toPtBrTime(apt.scheduledAt);
+    return localTime || apt.time;
   };
   const toDayKey = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -279,7 +294,7 @@ const Appointments = () => {
                           className="flex flex-col gap-4 sm:flex-row sm:items-start p-4 rounded-lg border-2 hover:border-primary/50 transition-all bg-card"
                         >
                           <div className="flex flex-row sm:flex-col items-center gap-2 sm:gap-1 min-w-[80px]">
-                            <span className="text-2xl font-bold text-primary">{apt.time}</span>
+                            <span className="text-2xl font-bold text-primary">{getAppointmentTime(apt)}</span>
                             <span className="text-xs text-muted-foreground">{apt.duration}</span>
                           </div>
                           <div className="flex-1 space-y-2">
@@ -308,9 +323,10 @@ const Appointments = () => {
                           </div>
                           <div className="flex flex-col gap-2 sm:items-end">
                             <Button
-                              size="sm"
+                              size="icon"
                               variant="outline"
-                              className="w-full sm:w-auto"
+                              title="Editar"
+                              aria-label="Editar"
                               onClick={() => {
                                 setEditing(apt);
                                 setForm({
@@ -326,17 +342,18 @@ const Appointments = () => {
                                 setDialogOpen(true);
                               }}
                             >
-                              Editar
+                              <Pencil className="h-4 w-4" />
                             </Button>
                             <Button
-                              size="sm"
+                              size="icon"
                               variant="ghost"
-                              className="w-full sm:w-auto"
+                              title="Excluir"
+                              aria-label="Excluir"
                               onClick={() => {
                                 if (window.confirm("Remover este agendamento?")) deleteMutation.mutate(apt.id);
                               }}
                             >
-                              Excluir
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
@@ -410,7 +427,7 @@ const Appointments = () => {
                             items.map((apt) => (
                               <div key={apt.id} className="flex items-center justify-between rounded-md bg-card px-3 py-2 text-xs shadow-sm">
                                 <div className="flex flex-col">
-                                  <span className="font-semibold">{apt.time}</span>
+                                  <span className="font-semibold">{getAppointmentTime(apt)}</span>
                                   <span className="text-muted-foreground">{apt.pet}</span>
                                 </div>
                                 {getStatusBadge(apt.status)}
@@ -596,7 +613,9 @@ const Appointments = () => {
               onClick={() => {
                 if (!form.client_id || !form.pet_id || !form.service_id) return toast.error("Cliente, pet e serviço são obrigatórios.");
                 if (!form.scheduled_at) return toast.error("Data e hora são obrigatórias.");
-                const payload = { ...form, scheduled_at: new Date(form.scheduled_at).toISOString() };
+                const scheduledAtIso = toIsoFromLocalInput(form.scheduled_at);
+                if (!scheduledAtIso) return toast.error("Data e hora inválidas.");
+                const payload = { ...form, scheduled_at: scheduledAtIso };
                 if (editing) {
                   updateMutation.mutate({ id: editing.id, data: payload });
                 } else {

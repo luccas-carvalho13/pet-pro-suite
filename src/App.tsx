@@ -2,11 +2,9 @@ import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
-import { useTheme } from "next-themes";
-import { getAppearanceSettings } from "@/lib/api";
 import { applyBrandPalette, resolveBrandPalette } from "@/lib/appearance";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -27,24 +25,15 @@ import Logs from "./pages/Logs";
 import MedicalRecords from "./pages/MedicalRecords";
 import Reminders from "./pages/Reminders";
 import CashRegister from "./pages/CashRegister";
+import Support from "./pages/Support";
+import Feedback from "./pages/Feedback";
 
 const queryClient = new QueryClient();
 
-const AppearanceSync = () => {
-  const { setTheme } = useTheme();
-  const hasToken = typeof window !== "undefined" && !!localStorage.getItem("petpro_token");
-  const { data: appearance } = useQuery({
-    queryKey: ["appearance-settings"],
-    queryFn: getAppearanceSettings,
-    enabled: hasToken,
-    retry: false,
-  });
-
+const BrandPaletteLock = () => {
   useEffect(() => {
-    if (!appearance) return;
-    setTheme(appearance.theme ?? "light");
-    applyBrandPalette(resolveBrandPalette(appearance.primary_color));
-  }, [appearance, setTheme]);
+    applyBrandPalette(resolveBrandPalette("petpro"));
+  }, []);
 
   return null;
 };
@@ -55,7 +44,7 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <AppearanceSync />
+        <BrandPaletteLock />
         <BrowserRouter
           future={{
             v7_startTransition: true,
@@ -80,6 +69,8 @@ const App = () => (
             <Route path="/cash-register" element={<CashRegister />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/support" element={<Support />} />
+            <Route path="/feedback" element={<Feedback />} />
             <Route path="/invite" element={<Invite />} />
             <Route path="/super-admin" element={<SuperAdmin />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

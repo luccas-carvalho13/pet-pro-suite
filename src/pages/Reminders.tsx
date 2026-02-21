@@ -20,8 +20,8 @@ const STATUS_OPTIONS = [
 ] as const;
 
 const statusBadge = (status: ReminderJob["status"]) => {
-  if (status === "pending") return <Badge className="bg-amber-500">Pendente</Badge>;
-  if (status === "sent") return <Badge className="bg-green-600">Enviado</Badge>;
+  if (status === "pending") return <Badge className="bg-warning text-warning-foreground">Pendente</Badge>;
+  if (status === "sent") return <Badge className="bg-success text-success-foreground">Enviado</Badge>;
   if (status === "failed") return <Badge variant="destructive">Falhou</Badge>;
   return <Badge variant="outline">Cancelado</Badge>;
 };

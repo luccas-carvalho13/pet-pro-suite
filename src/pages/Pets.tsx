@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Dog, Cat, Heart } from "lucide-react";
+import { Plus, Search, Dog, Cat, Heart, Pencil, Trash2 } from "lucide-react";
 import { createPet, deletePet, getClients, getPets, updatePet, type Client, type Pet } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -81,15 +81,15 @@ const Pets = () => {
     { label: "Total de Pets", value: String(pets.length), icon: Heart, color: "text-primary" },
     { label: "Cães", value: String(pets.filter((p: Pet) => p.species === "Cão").length), icon: Dog, color: "text-primary" },
     { label: "Gatos", value: String(pets.filter((p: Pet) => p.species === "Gato").length), icon: Cat, color: "text-secondary" },
-    { label: "Em Tratamento", value: String(pets.filter((p: Pet) => p.status === "treatment").length), icon: Heart, color: "text-orange-500" },
+    { label: "Em Tratamento", value: String(pets.filter((p: Pet) => p.status === "treatment").length), icon: Heart, color: "text-warning" },
   ];
 
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "healthy":
-        return <Badge className="bg-green-500">Saudável</Badge>;
+        return <Badge className="bg-success text-success-foreground">Saudável</Badge>;
       case "treatment":
-        return <Badge className="bg-orange-500">Em Tratamento</Badge>;
+        return <Badge className="bg-warning text-warning-foreground">Em Tratamento</Badge>;
       case "checkup":
         return <Badge variant="secondary">Check-up</Badge>;
       default:
@@ -102,9 +102,14 @@ const Pets = () => {
 
   const toDateInput = (value?: string | null) => {
     if (!value) return "";
-    const d = new Date(value);
-    const tz = d.getTimezoneOffset() * 60000;
-    return new Date(d.getTime() - tz).toISOString().slice(0, 10);
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const d = new Date(trimmed);
+    if (Number.isNaN(d.getTime())) return "";
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   };
 
   return (
@@ -189,11 +194,12 @@ const Pets = () => {
                             <p><span className="font-medium">Tutor:</span> {pet.owner}</p>
                             <p><span className="font-medium">Última visita:</span> {pet.lastVisit ? new Date(pet.lastVisit).toLocaleDateString("pt-BR") : "–"}</p>
                           </div>
-                          <div className="grid gap-2 mt-2">
+                          <div className="flex items-center justify-end gap-2 mt-2">
                             <Button
                               variant="outline"
-                              size="sm"
-                              className="w-full"
+                              size="icon"
+                              title="Editar"
+                              aria-label="Editar"
                               onClick={() => {
                               setEditing(pet);
                               setForm({
@@ -206,17 +212,18 @@ const Pets = () => {
                                 setDialogOpen(true);
                               }}
                             >
-                              Editar
+                              <Pencil className="h-4 w-4" />
                             </Button>
                             <Button
                               variant="ghost"
-                              size="sm"
-                              className="w-full"
+                              size="icon"
+                              title="Excluir"
+                              aria-label="Excluir"
                               onClick={() => {
                                 if (window.confirm("Remover este pet?")) deleteMutation.mutate(pet.id);
                               }}
                             >
-                              Excluir
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
