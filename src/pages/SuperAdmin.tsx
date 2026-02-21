@@ -89,9 +89,14 @@ const SuperAdmin = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "active":
-        return <Badge className="bg-green-500 gap-1"><CheckCircle2 className="h-3 w-3" />Ativa</Badge>;
+        return (
+          <Badge className="gap-1 border border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+            <CheckCircle2 className="h-3 w-3" />
+            Ativa
+          </Badge>
+        );
       case "trial":
-        return <Badge className="bg-primary">Trial</Badge>;
+        return <Badge className="border border-primary/30 bg-primary/15 text-primary">Trial</Badge>;
       case "past_due":
       case "overdue":
         return <Badge variant="destructive" className="gap-1"><AlertTriangle className="h-3 w-3" />Inadimplente</Badge>;
@@ -101,13 +106,16 @@ const SuperAdmin = () => {
   };
 
   const getPlanBadge = (plan: string) => {
-    const colors: Record<string, string> = {
-      Basic: "bg-slate-500",
-      Pro: "bg-primary",
-      Business: "bg-purple-500",
-      "–": "bg-muted",
-    };
-    return <Badge className={colors[plan] ?? "bg-muted"}>{plan}</Badge>;
+    if (plan === "Pro") {
+      return <Badge className="border border-primary/30 bg-primary/15 text-primary">Pro</Badge>;
+    }
+    if (plan === "Business") {
+      return <Badge className="border border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300">Business</Badge>;
+    }
+    if (plan === "Basic") {
+      return <Badge variant="secondary">Basic</Badge>;
+    }
+    return <Badge variant="outline">{plan}</Badge>;
   };
 
   return (
