@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,18 @@ export const SuperAdminLayout = ({ children }: SuperAdminLayoutProps) => {
     queryFn: getMe,
     retry: false,
   });
+  const shouldRedirectToLogin = !isLoading && !!(error || !me);
+  const shouldRedirectToDashboard = !isLoading && !!me && !me.is_superadmin;
+
+  useEffect(() => {
+    if (shouldRedirectToLogin) {
+      navigate("/login", { replace: true });
+      return;
+    }
+    if (shouldRedirectToDashboard) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [navigate, shouldRedirectToDashboard, shouldRedirectToLogin]);
 
   if (isLoading) {
     return (
@@ -22,13 +35,11 @@ export const SuperAdminLayout = ({ children }: SuperAdminLayoutProps) => {
     );
   }
 
-  if (error || !me) {
-    navigate("/login", { replace: true });
+  if (shouldRedirectToLogin) {
     return null;
   }
 
-  if (!me.is_superadmin) {
-    navigate("/dashboard", { replace: true });
+  if (shouldRedirectToDashboard) {
     return null;
   }
 
@@ -42,7 +53,8 @@ export const SuperAdminLayout = ({ children }: SuperAdminLayoutProps) => {
             </div>
             <div>
               <p className="text-sm uppercase tracking-widest text-muted-foreground">Super Admin</p>
-              <p className="text-lg font-semibold">Pet Pro Suite</p>
+              <p className="text-lg font-semibold">FourPet Pro</p>
+              <p className="text-xs text-muted-foreground">Gestão inteligente para negócios de quatro patas.</p>
             </div>
           </div>
           <div className="flex gap-2">

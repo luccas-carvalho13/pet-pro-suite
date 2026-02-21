@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Scissors, Stethoscope, Bath, Syringe } from "lucide-react";
+import { Plus, Search, Scissors, Stethoscope, Bath, Syringe, Pencil, Trash2 } from "lucide-react";
 import { createService, deleteService, getServices, updateService, type Service } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -187,7 +187,9 @@ const Services = () => {
                         <div className="flex gap-2 justify-end">
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            title="Editar"
+                            aria-label="Editar"
                             onClick={() => {
                               setEditing(s);
                               setForm({
@@ -200,16 +202,18 @@ const Services = () => {
                               setDialogOpen(true);
                             }}
                           >
-                            Editar
+                            <Pencil className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            title="Excluir"
+                            aria-label="Excluir"
                             onClick={() => {
                               if (window.confirm("Remover este serviço?")) deleteMutation.mutate(s.id);
                             }}
                           >
-                            Excluir
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>

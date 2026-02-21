@@ -125,10 +125,9 @@ const Register = () => {
             <div className="h-9 w-9 rounded-lg bg-white/20 flex items-center justify-center">
               <PawPrint className="h-5 w-5 text-white" />
             </div>
-            <span className="font-bold text-xl text-white">
-              Pet Pro <span className="text-white/90">Suite</span>
-            </span>
+            <span className="font-bold text-xl text-white">FourPet Pro</span>
           </Link>
+          <p className="mt-4 max-w-xs text-sm text-white/80">Gestão inteligente para negócios de quatro patas.</p>
           <div className="flex-1 flex items-center justify-center">
             <div className="rounded-3xl bg-white/95 p-10 flex flex-col items-center justify-center gap-6 shadow-2xl border border-white/50">
               <div className="flex items-center justify-center gap-6">
@@ -220,19 +219,19 @@ const Register = () => {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="email">E-mail</Label>
-                <Input id="email" type="email" {...register("email")} />
+                <Input id="email" type="email" autoComplete="email" {...register("email")} />
                 {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="password">Senha</Label>
-                <Input id="password" type="password" {...register("password")} />
+                <Input id="password" type="password" autoComplete="new-password" {...register("password")} />
                 {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
               </div>
             </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="confirm_password">Confirmar senha</Label>
-              <Input id="confirm_password" type="password" {...register("confirm_password")} />
+              <Input id="confirm_password" type="password" autoComplete="new-password" {...register("confirm_password")} />
               {errors.confirm_password && <p className="text-sm text-destructive">{errors.confirm_password.message}</p>}
             </div>
 

@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
 import { login, register, me, invite, checkEmail, changePassword } from './auth.js';
 import { requireAuth, requireAdmin, requireCompany } from './middleware.js';
 import * as api from './routes/api.js';
@@ -14,7 +15,8 @@ export function createApp() {
   const app = express();
 
   app.use(cors({ origin: true, credentials: true }));
-  app.use(express.json());
+  app.use(express.json({ limit: '30mb' }));
+  app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
   app.use(observabilityMiddleware);
 
   app.post('/auth/login', loginRateLimit, login);
@@ -72,6 +74,12 @@ export function createApp() {
   app.put('/api/settings/security', requireAuth, api.updateUserSecuritySettings);
   app.get('/api/settings/users', requireAuth, requireCompany, api.getCompanyUsers);
   app.put('/api/settings/users/:id', requireAuth, requireCompany, api.updateCompanyUserRole);
+  app.get('/api/attachments', requireAuth, requireCompany, api.getAttachments);
+  app.post('/api/attachments', requireAuth, requireCompany, api.uploadAttachment);
+  app.delete('/api/attachments/:id', requireAuth, requireCompany, api.deleteAttachment);
+  app.post('/api/profile/avatar', requireAuth, requireCompany, api.uploadProfileAvatar);
+  app.delete('/api/profile/avatar', requireAuth, api.removeProfileAvatar);
+  app.put('/api/profile', requireAuth, api.updateMyProfile);
   app.get('/api/reports/export', requireAuth, requireCompany, api.exportReport);
 app.get('/api/admin/plans', requireAuth, api.getPlans);
 app.put('/api/admin/plans/:id', requireAuth, api.updatePlan);
@@ -83,6 +91,14 @@ app.get('/api/admin/metrics', requireAuth, api.getAdminMetrics);
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
   app.get('/metrics', requireAuth, requireAdmin, (_req, res) => res.json(getMetricsSnapshot()));
+  app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const e = err as { type?: string };
+    if (e?.type === 'entity.too.large') {
+      res.status(413).json({ error: 'Arquivo muito grande para upload.' });
+      return;
+    }
+    next(err);
+  });
   return app;
 }
 

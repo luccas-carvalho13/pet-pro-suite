@@ -102,6 +102,23 @@ export const medicalRecordPayloadSchema = z.object({
   notes: z.string().trim().optional(),
 });
 
+export const attachmentUploadSchema = z.object({
+  entity_type: z.enum(['medical_record', 'appointment', 'transaction', 'client', 'pet']),
+  entity_id: z.string().uuid('Registro inválido.'),
+  file_name: nonEmpty('Nome do arquivo').max(180, 'Nome do arquivo muito longo.'),
+  data_url: z.string().trim().min(1, 'Arquivo é obrigatório.'),
+});
+
+export const avatarUploadSchema = z.object({
+  file_name: nonEmpty('Nome do arquivo').max(180, 'Nome do arquivo muito longo.'),
+  data_url: z.string().trim().min(1, 'Arquivo é obrigatório.'),
+});
+
+export const profileUpdateSchema = z.object({
+  full_name: nonEmpty('Nome completo'),
+  email: emailSchema,
+});
+
 export const reminderProcessPayloadSchema = z.object({
   limit: z.number().int().min(1, 'Limite inválido.').max(200, 'Limite inválido.').optional(),
 });

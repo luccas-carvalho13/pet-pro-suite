@@ -47,10 +47,9 @@ const Login = () => {
             <div className="h-9 w-9 rounded-lg bg-white/20 flex items-center justify-center">
               <PawPrint className="h-5 w-5 text-white" />
             </div>
-            <span className="font-bold text-xl text-white">
-              Pet Pro <span className="text-white/90">Suite</span>
-            </span>
+            <span className="font-bold text-xl text-white">FourPet Pro</span>
           </Link>
+          <p className="mt-4 max-w-xs text-sm text-white/80">Gestão inteligente para negócios de quatro patas.</p>
           <div className="flex-1 flex items-center justify-center">
             <div className="rounded-3xl bg-white/95 p-10 flex flex-col items-center justify-center gap-6 shadow-2xl border border-white/50">
               <div className="flex items-center justify-center gap-6">

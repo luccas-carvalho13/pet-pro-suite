@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, TrendingUp, TrendingDown, DollarSign, Wallet } from "lucide-react";
+import { Plus, Search, TrendingUp, TrendingDown, DollarSign, Wallet, Pencil, Trash2 } from "lucide-react";
 import { createTransaction, deleteTransaction, getTransactions, updateTransaction, type TransactionRevenue, type TransactionExpense } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -82,8 +82,8 @@ const Financial = () => {
 
   const getStatusBadge = (status: string) =>
     status === "paid"
-      ? <Badge className="bg-green-500">Pago</Badge>
-      : <Badge className="bg-orange-500">Pendente</Badge>;
+      ? <Badge className="bg-success text-success-foreground">Pago</Badge>
+      : <Badge className="bg-warning text-warning-foreground">Pendente</Badge>;
 
   const iconMap: Record<string, typeof TrendingUp> = {
     TrendingUp,
@@ -177,13 +177,15 @@ const Financial = () => {
                           <TableCell>{new Date(r.date).toLocaleDateString("pt-BR")}</TableCell>
                           <TableCell className="font-medium">{r.description}</TableCell>
                           <TableCell className="hidden md:table-cell">{r.type}</TableCell>
-                          <TableCell className="text-right text-green-600 font-semibold">R$ {Number(r.value).toFixed(2)}</TableCell>
+                          <TableCell className="text-right text-success font-semibold">R$ {Number(r.value).toFixed(2)}</TableCell>
                           <TableCell className="text-center hidden md:table-cell">{getStatusBadge(r.status)}</TableCell>
                           <TableCell className="text-right">
                             <div className="flex gap-2 justify-end">
                               <Button
                                 variant="ghost"
-                                size="sm"
+                                size="icon"
+                                title="Editar"
+                                aria-label="Editar"
                                 onClick={() => {
                                   setEditing({ id: r.id, type: "revenue" });
                                   setForm({
@@ -197,16 +199,18 @@ const Financial = () => {
                                   setDialogOpen(true);
                                 }}
                               >
-                                Editar
+                                <Pencil className="h-4 w-4" />
                               </Button>
                               <Button
                                 variant="ghost"
-                                size="sm"
+                                size="icon"
+                                title="Excluir"
+                                aria-label="Excluir"
                                 onClick={() => {
                                   if (window.confirm("Remover esta transação?")) deleteMutation.mutate(r.id);
                                 }}
                               >
-                                Excluir
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
                           </TableCell>
@@ -253,7 +257,9 @@ const Financial = () => {
                             <div className="flex gap-2 justify-end">
                               <Button
                                 variant="ghost"
-                                size="sm"
+                                size="icon"
+                                title="Editar"
+                                aria-label="Editar"
                                 onClick={() => {
                                   setEditing({ id: e.id, type: "expense" });
                                   setForm({
@@ -267,16 +273,18 @@ const Financial = () => {
                                   setDialogOpen(true);
                                 }}
                               >
-                                Editar
+                                <Pencil className="h-4 w-4" />
                               </Button>
                               <Button
                                 variant="ghost"
-                                size="sm"
+                                size="icon"
+                                title="Excluir"
+                                aria-label="Excluir"
                                 onClick={() => {
                                   if (window.confirm("Remover esta transação?")) deleteMutation.mutate(e.id);
                                 }}
                               >
-                                Excluir
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
                           </TableCell>

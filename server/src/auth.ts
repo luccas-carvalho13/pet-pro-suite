@@ -45,7 +45,7 @@ export async function login(req: Request, res: Response) {
 
     const token = createToken(user.id);
     let company: { id: string; name: string } | null = null;
-    const prof = await pool.query('SELECT company_id FROM public.profiles WHERE id = $1', [user.id]);
+    const prof = await pool.query('SELECT company_id, avatar_url, full_name FROM public.profiles WHERE id = $1', [user.id]);
     if (prof.rows[0]?.company_id) {
       const co = await pool.query('SELECT id, name FROM public.companies WHERE id = $1', [prof.rows[0].company_id]);
       if (co.rows[0]) company = { id: co.rows[0].id, name: co.rows[0].name };
@@ -56,7 +56,8 @@ export async function login(req: Request, res: Response) {
       user: {
         id: user.id,
         email: user.email,
-        full_name: user.raw_user_meta_data?.full_name ?? '',
+        full_name: prof.rows[0]?.full_name ?? user.raw_user_meta_data?.full_name ?? '',
+        avatar_url: prof.rows[0]?.avatar_url ?? null,
       },
       company,
     });
@@ -282,7 +283,7 @@ export async function me(req: Request, res: Response) {
     let company: { id: string; name: string } | null = null;
     let isAdmin = false;
     let isSuperAdmin = false;
-    const prof = await pool.query('SELECT company_id FROM public.profiles WHERE id = $1', [user.id]);
+    const prof = await pool.query('SELECT company_id, full_name, avatar_url FROM public.profiles WHERE id = $1', [user.id]);
     if (prof.rows[0]?.company_id) {
       const co = await pool.query('SELECT id, name FROM public.companies WHERE id = $1', [prof.rows[0].company_id]);
       if (co.rows[0]) company = { id: co.rows[0].id, name: co.rows[0].name };
@@ -302,7 +303,8 @@ export async function me(req: Request, res: Response) {
       user: {
         id: user.id,
         email: user.email,
-        full_name: (user.raw_user_meta_data as { full_name?: string } | null)?.full_name ?? '',
+        full_name: prof.rows[0]?.full_name ?? (user.raw_user_meta_data as { full_name?: string } | null)?.full_name ?? '',
+        avatar_url: prof.rows[0]?.avatar_url ?? null,
       },
       company,
       is_admin: isAdmin,

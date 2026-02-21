@@ -9,33 +9,67 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Search, Stethoscope } from "lucide-react";
+import { Plus, Search, Stethoscope, Eye, Pencil, Trash2, Paperclip, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   createMedicalRecord,
+  deleteAttachment as deleteEntityAttachment,
   deleteMedicalRecord,
+  getAttachments,
   getMedicalRecords,
   getPets,
+  uploadAttachment,
   updateMedicalRecord,
+  type EntityAttachment,
   type MedicalRecord,
   type MedicalRecordPayload,
   type Pet,
 } from "@/lib/api";
 
+const toLocalDateISO = (date: Date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const toDateInput = (value: string) => {
-  const d = new Date(value);
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const d = new Date(trimmed);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toISOString().slice(0, 10);
+  return toLocalDateISO(d);
+};
+
+const formatRecordDate = (value: string) => {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const [year, month, day] = trimmed.split("-");
+    return `${day}/${month}/${year}`;
+  }
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("pt-BR");
+};
+
+const formatBytes = (value: number) => {
+  if (!value) return "0 KB";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 const MedicalRecords = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<MedicalRecord | null>(null);
+  const [viewing, setViewing] = useState<MedicalRecord | null>(null);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [form, setForm] = useState<MedicalRecordPayload>({
     pet_id: "",
     appointment_id: "",
-    record_date: new Date().toISOString().slice(0, 10),
+    record_date: toLocalDateISO(),
     weight_kg: undefined,
     temperature_c: undefined,
     diagnosis: "",
@@ -51,24 +85,24 @@ const MedicalRecords = () => {
   });
 
   const { data: pets = [] } = useQuery({ queryKey: ["pets"], queryFn: getPets });
+  const { data: editingAttachments = [] } = useQuery({
+    queryKey: ["attachments", "medical_record", editing?.id],
+    queryFn: () => getAttachments("medical_record", editing!.id),
+    enabled: dialogOpen && !!editing?.id,
+  });
+  const { data: viewingAttachments = [] } = useQuery({
+    queryKey: ["attachments", "medical_record", viewing?.id],
+    queryFn: () => getAttachments("medical_record", viewing!.id),
+    enabled: viewDialogOpen && !!viewing?.id,
+  });
 
   const createMutation = useMutation({
     mutationFn: createMedicalRecord,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["medical-records"] });
-      toast.success("Prontuário criado.");
-      setDialogOpen(false);
-    },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Erro ao criar prontuário."),
   });
 
   const updateMutation = useMutation({
     mutationFn: (payload: { id: string; data: MedicalRecordPayload }) => updateMedicalRecord(payload.id, payload.data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["medical-records"] });
-      toast.success("Prontuário atualizado.");
-      setDialogOpen(false);
-    },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Erro ao atualizar prontuário."),
   });
 
@@ -81,6 +115,15 @@ const MedicalRecords = () => {
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Erro ao remover prontuário."),
   });
 
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: deleteEntityAttachment,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["attachments"] });
+      toast.success("Anexo removido.");
+    },
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Erro ao remover anexo."),
+  });
+
   const selectedPet = useMemo(
     () => pets.find((pet: Pet) => pet.id === form.pet_id),
     [pets, form.pet_id]
@@ -88,10 +131,11 @@ const MedicalRecords = () => {
 
   const resetForm = () => {
     setEditing(null);
+    setSelectedFiles([]);
     setForm({
       pet_id: "",
       appointment_id: "",
-      record_date: new Date().toISOString().slice(0, 10),
+      record_date: toLocalDateISO(),
       weight_kg: undefined,
       temperature_c: undefined,
       diagnosis: "",
@@ -107,6 +151,7 @@ const MedicalRecords = () => {
 
   const openEdit = (record: MedicalRecord) => {
     setEditing(record);
+    setSelectedFiles([]);
     setForm({
       pet_id: record.pet_id,
       appointment_id: record.appointment_id ?? "",
@@ -120,7 +165,12 @@ const MedicalRecords = () => {
     setDialogOpen(true);
   };
 
-  const handleSave = () => {
+  const openView = (record: MedicalRecord) => {
+    setViewing(record);
+    setViewDialogOpen(true);
+  };
+
+  const handleSave = async () => {
     if (!form.pet_id) return toast.error("Selecione o pet.");
     if (!form.record_date) return toast.error("Informe a data do registro.");
 
@@ -135,11 +185,24 @@ const MedicalRecords = () => {
       notes: form.notes?.trim() || undefined,
     };
 
-    if (editing) {
-      updateMutation.mutate({ id: editing.id, data: payload });
-      return;
+    try {
+      const saved = editing
+        ? await updateMutation.mutateAsync({ id: editing.id, data: payload })
+        : await createMutation.mutateAsync(payload);
+
+      if (selectedFiles.length > 0) {
+        for (const file of selectedFiles) {
+          await uploadAttachment("medical_record", saved.id, file);
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+      await queryClient.invalidateQueries({ queryKey: ["attachments"] });
+      toast.success(editing ? "Prontuário atualizado." : "Prontuário criado.");
+      setDialogOpen(false);
+      resetForm();
+    } catch {
+      // feedback already shown by mutations
     }
-    createMutation.mutate(payload);
   };
 
   return (
@@ -191,23 +254,28 @@ const MedicalRecords = () => {
                 <TableBody>
                   {records.map((record) => (
                     <TableRow key={record.id}>
-                      <TableCell>{new Date(record.record_date).toLocaleDateString("pt-BR")}</TableCell>
+                      <TableCell>{formatRecordDate(record.record_date)}</TableCell>
                       <TableCell className="font-medium">{record.pet_name}</TableCell>
                       <TableCell className="hidden md:table-cell">{record.client_name}</TableCell>
                       <TableCell className="hidden lg:table-cell max-w-[320px] truncate">{record.diagnosis || "—"}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => openEdit(record)}>
-                            Editar
+                          <Button variant="ghost" size="icon" title="Ver" aria-label="Ver" onClick={() => openView(record)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" title="Editar" aria-label="Editar" onClick={() => openEdit(record)}>
+                            <Pencil className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            title="Excluir"
+                            aria-label="Excluir"
                             onClick={() => {
                               if (window.confirm("Remover este prontuário?")) deleteMutation.mutate(record.id);
                             }}
                           >
-                            Excluir
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>
@@ -220,7 +288,13 @@ const MedicalRecords = () => {
         </Card>
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) resetForm();
+        }}
+      >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Editar prontuário" : "Novo prontuário"}</DialogTitle>
@@ -303,13 +377,165 @@ const MedicalRecords = () => {
                 onChange={(e) => setForm((s) => ({ ...s, notes: e.target.value }))}
               />
             </div>
+
+            <div className="space-y-2 sm:col-span-2">
+              <Label className="flex items-center gap-2">
+                <Paperclip className="h-4 w-4" />
+                Anexos
+              </Label>
+              <div className="rounded-lg border p-3 space-y-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-muted-foreground">Anexe exames, fotos e documentos (até 8MB).</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={() => document.getElementById("medicalRecordFilesInput")?.click()}
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    Selecionar arquivos
+                  </Button>
+                  <input
+                    id="medicalRecordFilesInput"
+                    type="file"
+                    className="hidden"
+                    multiple
+                    accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      if (!files.length) return;
+                      setSelectedFiles((prev) => [...prev, ...files]);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </div>
+
+                {editing && editingAttachments.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Anexos já enviados</p>
+                    {editingAttachments.map((attachment: EntityAttachment) => (
+                      <div key={attachment.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5">
+                        <a
+                          href={attachment.file_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm text-primary underline-offset-4 hover:underline truncate"
+                        >
+                          {attachment.file_name}
+                        </a>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">{formatBytes(attachment.size_bytes)}</span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => deleteAttachmentMutation.mutate(attachment.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {selectedFiles.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Arquivos selecionados para envio</p>
+                    {selectedFiles.map((file, index) => (
+                      <div key={`${file.name}-${index}`} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5">
+                        <span className="text-sm truncate">{file.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">{formatBytes(file.size)}</span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => setSelectedFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index))}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={createMutation.isPending || updateMutation.isPending}>
+            <Button onClick={() => void handleSave()} disabled={createMutation.isPending || updateMutation.isPending}>
               {editing ? "Salvar" : "Criar"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Visualizar prontuário</DialogTitle>
+            <DialogDescription>Dados clínicos registrados.</DialogDescription>
+          </DialogHeader>
+          {viewing ? (
+            <div className="grid gap-4 py-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">Data</p>
+                <p className="font-medium">{formatRecordDate(viewing.record_date)}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">Pet</p>
+                <p className="font-medium">{viewing.pet_name}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">Tutor</p>
+                <p className="font-medium">{viewing.client_name}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">Peso / Temperatura</p>
+                <p className="font-medium">
+                  {viewing.weight_kg != null ? `${viewing.weight_kg} kg` : "—"} / {viewing.temperature_c != null ? `${viewing.temperature_c} ºC` : "—"}
+                </p>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <p className="text-xs text-muted-foreground">Diagnóstico</p>
+                <p className="font-medium whitespace-pre-wrap">{viewing.diagnosis || "—"}</p>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <p className="text-xs text-muted-foreground">Tratamento</p>
+                <p className="font-medium whitespace-pre-wrap">{viewing.treatment || "—"}</p>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <p className="text-xs text-muted-foreground">Observações</p>
+                <p className="font-medium whitespace-pre-wrap">{viewing.notes || "—"}</p>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <p className="text-xs text-muted-foreground">Anexos</p>
+                {viewingAttachments.length ? (
+                  <div className="space-y-2">
+                    {viewingAttachments.map((attachment: EntityAttachment) => (
+                      <a
+                        key={attachment.id}
+                        href={attachment.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between rounded-md border px-2 py-1.5 text-sm text-primary underline-offset-4 hover:underline"
+                      >
+                        <span className="truncate">{attachment.file_name}</span>
+                        <span className="text-xs text-muted-foreground">{formatBytes(attachment.size_bytes)}</span>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="font-medium">—</p>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewDialogOpen(false)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

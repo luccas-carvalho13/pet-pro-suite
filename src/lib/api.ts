@@ -14,7 +14,7 @@ function isNetworkError(err: unknown): boolean {
   return false;
 }
 
-export type AuthUser = { id: string; email: string; full_name: string };
+export type AuthUser = { id: string; email: string; full_name: string; avatar_url?: string | null };
 
 function getToken(): string | null {
   return localStorage.getItem('petpro_token');
@@ -175,6 +175,57 @@ function authHeaders(): Record<string, string> {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     'Content-Type': 'application/json',
   };
+}
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("Falha ao ler o arquivo."));
+        return;
+      }
+      resolve(result);
+    };
+    reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function imageToOptimizedAvatarDataUrl(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) {
+    return fileToDataUrl(file);
+  }
+
+  const originalDataUrl = await fileToDataUrl(file);
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Falha ao processar imagem."));
+    image.src = originalDataUrl;
+  });
+
+  const maxSide = 1024;
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+  const width = Math.max(1, Math.round(img.width * scale));
+  const height = Math.max(1, Math.round(img.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return originalDataUrl;
+
+  ctx.drawImage(img, 0, 0, width, height);
+
+  const webp = canvas.toDataURL("image/webp", 0.82);
+  if (webp && webp.length < originalDataUrl.length) return webp;
+
+  const jpeg = canvas.toDataURL("image/jpeg", 0.82);
+  if (jpeg && jpeg.length < originalDataUrl.length) return jpeg;
+
+  return originalDataUrl;
 }
 
 async function apiRequest<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown): Promise<T> {
@@ -564,7 +615,7 @@ export async function updateSecuritySettings(payload: SecuritySettings): Promise
   await apiRequest<void>('/api/settings/security', 'PUT', payload);
 }
 
-export type CompanyUser = { id: string; name: string; email: string; role: string };
+export type CompanyUser = { id: string; name: string; email: string; role: string; avatar_url?: string | null };
 export async function getCompanyUsers(): Promise<CompanyUser[]> {
   return apiGet<CompanyUser[]>('/api/settings/users');
 }
@@ -578,6 +629,57 @@ export async function changePassword(current_password: string, new_password: str
 
 export async function getCompanyUser(id: string): Promise<CompanyUser> {
   return apiGet<CompanyUser>(`/api/settings/users/${id}`);
+}
+
+export type EntityAttachment = {
+  id: string;
+  file_name: string;
+  file_url: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+};
+
+export async function getAttachments(entityType: "medical_record" | "appointment" | "transaction" | "client" | "pet", entityId: string): Promise<EntityAttachment[]> {
+  return apiGet<EntityAttachment[]>(`/api/attachments?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`);
+}
+
+export async function uploadAttachment(
+  entityType: "medical_record" | "appointment" | "transaction" | "client" | "pet",
+  entityId: string,
+  file: File
+): Promise<EntityAttachment> {
+  const dataUrl = await fileToDataUrl(file);
+  return apiRequest<EntityAttachment>("/api/attachments", "POST", {
+    entity_type: entityType,
+    entity_id: entityId,
+    file_name: file.name,
+    data_url: dataUrl,
+  });
+}
+
+export async function deleteAttachment(id: string): Promise<void> {
+  await apiRequest<void>(`/api/attachments/${id}`, "DELETE");
+}
+
+export async function uploadProfileAvatar(file: File): Promise<{ avatar_url: string }> {
+  const dataUrl = await imageToOptimizedAvatarDataUrl(file);
+  const approxBytes = Math.ceil((dataUrl.length * 3) / 4);
+  if (approxBytes > 7.5 * 1024 * 1024) {
+    throw new Error("Imagem muito grande. Envie uma foto menor.");
+  }
+  return apiRequest<{ avatar_url: string }>("/api/profile/avatar", "POST", {
+    file_name: file.name,
+    data_url: dataUrl,
+  });
+}
+
+export async function removeProfileAvatar(): Promise<void> {
+  await apiRequest<void>("/api/profile/avatar", "DELETE");
+}
+
+export async function updateMyProfile(payload: { full_name: string; email: string }): Promise<AuthUser> {
+  return apiRequest<AuthUser>("/api/profile", "PUT", payload);
 }
 
 export type Plan = {
@@ -605,7 +707,7 @@ export async function updateCompany(id: string, payload: AdminCompanyPayload): P
   return apiRequest<{ id: string; name: string; status: string; created_at: string }>(`/api/admin/companies/${id}`, 'PUT', payload);
 }
 
-export async function exportReport(type: 'clients' | 'financial' | 'inventory' | 'services'): Promise<Blob> {
+export async function exportReport(type: 'clients' | 'financial' | 'inventory' | 'services' | 'users'): Promise<Blob> {
   const res = await fetch(`${API_URL}/api/reports/export?type=${type}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.blob();
